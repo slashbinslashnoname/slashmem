@@ -2,6 +2,7 @@ pub mod cli;
 pub mod confidence;
 pub mod db;
 pub mod error;
+pub mod exit_codes;
 pub mod output;
 pub mod schema;
 
@@ -21,7 +22,7 @@ fn main() {
 
     if let Err(e) = result {
         eprintln!("error: {e}");
-        std::process::exit(1);
+        std::process::exit(e.exit_code());
     }
 }
 

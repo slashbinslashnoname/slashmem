@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::exit_codes;
+
 /// Unified error type for slashmem.
 #[derive(Debug)]
 pub enum AppError {
@@ -50,6 +52,19 @@ impl From<serde_json::Error> for AppError {
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
         AppError::Io(e)
+    }
+}
+
+impl AppError {
+    /// Return the semantic exit code for this error.
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            AppError::Database(_) => exit_codes::GENERAL_ERROR,
+            AppError::Json(_) => exit_codes::GENERAL_ERROR,
+            AppError::Io(e) if e.kind() == std::io::ErrorKind::NotFound => exit_codes::NOT_FOUND,
+            AppError::Io(_) => exit_codes::IO_ERROR,
+            AppError::Other(_) => exit_codes::GENERAL_ERROR,
+        }
     }
 }
 
@@ -110,5 +125,36 @@ mod tests {
         }
         assert_eq!(ok_fn().unwrap(), 42);
         assert!(err_fn().is_err());
+    }
+
+    #[test]
+    fn exit_code_database() {
+        let err: AppError = rusqlite::Error::InvalidColumnName("x".into()).into();
+        assert_eq!(err.exit_code(), exit_codes::GENERAL_ERROR);
+    }
+
+    #[test]
+    fn exit_code_json() {
+        let err: AppError = serde_json::from_str::<String>("bad").unwrap_err().into();
+        assert_eq!(err.exit_code(), exit_codes::GENERAL_ERROR);
+    }
+
+    #[test]
+    fn exit_code_io_not_found() {
+        let err: AppError = std::io::Error::new(std::io::ErrorKind::NotFound, "gone").into();
+        assert_eq!(err.exit_code(), exit_codes::NOT_FOUND);
+    }
+
+    #[test]
+    fn exit_code_io_other() {
+        let err: AppError =
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied").into();
+        assert_eq!(err.exit_code(), exit_codes::IO_ERROR);
+    }
+
+    #[test]
+    fn exit_code_other() {
+        let err = AppError::Other("something".into());
+        assert_eq!(err.exit_code(), exit_codes::GENERAL_ERROR);
     }
 }
