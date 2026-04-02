@@ -16,6 +16,44 @@ pub struct Cli {
     pub command: Commands,
 }
 
+impl Cli {
+    /// Parse CLI arguments, printing compact help and exiting when no
+    /// subcommand is provided instead of showing clap's verbose error.
+    pub fn parse_or_short_help() -> Self {
+        match Self::try_parse() {
+            Ok(cli) => cli,
+            Err(e) => {
+                // Missing subcommand → short help on stdout, exit 0.
+                if e.kind() == clap::error::ErrorKind::MissingSubcommand
+                    || (e.kind() == clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand)
+                {
+                    Self::print_short_help();
+                    std::process::exit(0);
+                }
+                // Everything else (--help, --version, real errors): let clap handle it.
+                e.exit();
+            }
+        }
+    }
+
+    /// Print a one-screen summary of available commands.
+    fn print_short_help() {
+        let version = env!("CARGO_PKG_VERSION");
+        eprintln!("sm {version} — a local memory store for AI agents");
+        eprintln!();
+        eprintln!("Usage: sm [OPTIONS] <COMMAND>");
+        eprintln!();
+        eprintln!("Commands:");
+        eprintln!("  context   Query memory for relevant context");
+        eprintln!("  ingest    Ingest an episodic record");
+        eprintln!("  distill   Run confidence decay, transitions, and pruning");
+        eprintln!("  status    Show database health and record counts");
+        eprintln!("  rules     Manage procedural rules");
+        eprintln!();
+        eprintln!("Run `sm <command> --help` for details, or `sm --help` for all options.");
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Query memory for relevant context given a task description
@@ -331,5 +369,24 @@ mod tests {
         let cli = Cli::parse_from(["sm", "--json", "rules", "list"]);
         assert!(cli.json);
         assert!(matches!(cli.command, Commands::Rules(_)));
+    }
+
+    #[test]
+    fn try_parse_no_args_is_error() {
+        // Running with no subcommand should produce a clap error.
+        let result = Cli::try_parse_from(["sm"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn try_parse_valid_args_succeeds() {
+        let result = Cli::try_parse_from(["sm", "status"]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn print_short_help_does_not_panic() {
+        // Ensure the short-help output function runs without errors.
+        Cli::print_short_help();
     }
 }

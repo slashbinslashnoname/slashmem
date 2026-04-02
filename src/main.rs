@@ -9,12 +9,11 @@ pub mod schema;
 
 use std::io::IsTerminal;
 
-use clap::Parser;
 use cli::{Cli, Commands};
 use output::Render;
 
 fn main() {
-    let cli = Cli::parse();
+    let cli = Cli::parse_or_short_help();
     let fmt = format::FormatContext::detect(cli.json, cli.quiet);
 
     let result = match cli.command {

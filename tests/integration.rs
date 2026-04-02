@@ -496,6 +496,33 @@ fn rules_list_with_query_filters() {
 }
 
 // ---------------------------------------------------------------------------
+// 17. no subcommand prints short help and exits 0
+// ---------------------------------------------------------------------------
+
+#[test]
+fn no_subcommand_prints_short_help_and_exits_zero() {
+    let output = sm_bin().output().expect("failed to run sm");
+    assert!(
+        output.status.success(),
+        "sm with no args should exit 0, got {}",
+        output.status
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Usage:"),
+        "short help should include Usage line: {stderr}"
+    );
+    assert!(
+        stderr.contains("Commands:"),
+        "short help should list commands: {stderr}"
+    );
+    assert!(
+        stderr.contains("status"),
+        "short help should mention 'status' command: {stderr}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Bonus: distill on empty DB returns zeros
 // ---------------------------------------------------------------------------
 
