@@ -36,7 +36,7 @@ pub enum Commands {
 #[derive(clap::Args, Debug)]
 pub struct RulesArgs {
     #[command(subcommand)]
-    pub action: RulesAction,
+    pub action: Option<RulesAction>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -255,9 +255,18 @@ mod tests {
         let cli = Cli::parse_from(["sm", "rules", "list"]);
         match cli.command {
             Some(Commands::Rules(args)) => match args.action {
-                RulesAction::List(list) => assert!(list.query.is_none()),
+                Some(RulesAction::List(list)) => assert!(list.query.is_none()),
                 _ => panic!("expected List"),
             },
+            _ => panic!("expected Rules command"),
+        }
+    }
+
+    #[test]
+    fn parse_rules_no_subcommand_yields_none() {
+        let cli = Cli::parse_from(["sm", "rules"]);
+        match cli.command {
+            Some(Commands::Rules(args)) => assert!(args.action.is_none()),
             _ => panic!("expected Rules command"),
         }
     }
@@ -267,7 +276,7 @@ mod tests {
         let cli = Cli::parse_from(["sm", "rules", "list", "--query", "deploy"]);
         match cli.command {
             Some(Commands::Rules(args)) => match args.action {
-                RulesAction::List(list) => assert_eq!(list.query.as_deref(), Some("deploy")),
+                Some(RulesAction::List(list)) => assert_eq!(list.query.as_deref(), Some("deploy")),
                 _ => panic!("expected List"),
             },
             _ => panic!("expected Rules command"),
@@ -279,7 +288,7 @@ mod tests {
         let cli = Cli::parse_from(["sm", "rules", "add", "r1", "Always test"]);
         match cli.command {
             Some(Commands::Rules(args)) => match args.action {
-                RulesAction::Add(add) => {
+                Some(RulesAction::Add(add)) => {
                     assert_eq!(add.id, "r1");
                     assert_eq!(add.rule, "Always test");
                     assert!(add.source.is_none());
@@ -295,7 +304,7 @@ mod tests {
         let cli = Cli::parse_from(["sm", "rules", "add", "r1", "test", "--source", "postmortem"]);
         match cli.command {
             Some(Commands::Rules(args)) => match args.action {
-                RulesAction::Add(add) => {
+                Some(RulesAction::Add(add)) => {
                     assert_eq!(add.source.as_deref(), Some("postmortem"));
                 }
                 _ => panic!("expected Add"),
@@ -309,7 +318,7 @@ mod tests {
         let cli = Cli::parse_from(["sm", "rules", "rm", "r1"]);
         match cli.command {
             Some(Commands::Rules(args)) => match args.action {
-                RulesAction::Rm(rm) => assert_eq!(rm.id, "r1"),
+                Some(RulesAction::Rm(rm)) => assert_eq!(rm.id, "r1"),
                 _ => panic!("expected Rm"),
             },
             _ => panic!("expected Rules command"),
@@ -321,7 +330,7 @@ mod tests {
         let cli = Cli::parse_from(["sm", "rules", "show", "r1"]);
         match cli.command {
             Some(Commands::Rules(args)) => match args.action {
-                RulesAction::Show(show) => assert_eq!(show.id, "r1"),
+                Some(RulesAction::Show(show)) => assert_eq!(show.id, "r1"),
                 _ => panic!("expected Show"),
             },
             _ => panic!("expected Rules command"),

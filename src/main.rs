@@ -297,7 +297,10 @@ fn cmd_prompt(fmt: &format::FormatContext) -> error::Result<()> {
 // --- rules subcommand ---
 
 fn cmd_rules(args: cli::RulesArgs, fmt: &format::FormatContext) -> error::Result<()> {
-    match args.action {
+    let action = args
+        .action
+        .unwrap_or(cli::RulesAction::List(cli::RulesListArgs { query: None }));
+    match action {
         cli::RulesAction::List(list_args) => cmd_rules_list(list_args, fmt),
         cli::RulesAction::Add(add_args) => cmd_rules_add(add_args, fmt),
         cli::RulesAction::Rm(rm_args) => cmd_rules_rm(rm_args, fmt),

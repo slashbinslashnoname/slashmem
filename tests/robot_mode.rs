@@ -114,6 +114,18 @@ fn pipe_prompt_quiet_suppresses_output() {
 }
 
 #[test]
+fn pipe_rules_no_subcommand_defaults_to_list() {
+    let tmp = tempfile::tempdir().unwrap();
+    run_sm(&tmp, &["context", "init"]); // create DB
+    let output = run_sm(&tmp, &["rules"]);
+    assert!(output.status.success(), "sm rules should succeed");
+    let json = parse_success(&output);
+    assert!(json.is_object());
+    assert!(json.get("rules").is_some());
+    assert!(json.get("count").is_some());
+}
+
+#[test]
 fn pipe_no_subcommand_outputs_error_envelope() {
     // In non-TTY (robot mode), no subcommand should produce a JSON error envelope
     let output = sm_bin().output().expect("failed to run sm");
