@@ -2,6 +2,6 @@
   "database": "dolt",
   "backend": "dolt",
   "dolt_mode": "server",
-  "dolt_database": "slashmem_6188acc3",
-  "project_id": "41d7b4c3-acb6-4e21-abe6-97f0969e0535"
+  "dolt_database": "slashmem",
+  "project_id": "c71b623b-4f6d-4d81-8dfd-f03dcceaade8"
 }
