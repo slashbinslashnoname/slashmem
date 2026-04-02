@@ -54,12 +54,10 @@ mod tests {
 
     #[test]
     fn non_tty_defaults_to_json() {
-        // When not TTY and no explicit json flag, detect() sets json=true.
-        let ctx = FormatContext {
-            is_tty: false,
-            json: false || !false, // json_flag=false, is_tty=false → true
-            quiet: false,
-        };
+        // detect() sets json=true when not a TTY and no explicit json flag.
+        // The test harness always runs with captured (non-TTY) stdout.
+        let ctx = FormatContext::detect(false, false);
+        assert!(!ctx.is_tty);
         assert!(ctx.use_json());
     }
 
