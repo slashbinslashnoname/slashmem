@@ -23,10 +23,10 @@ pub fn db_path() -> PathBuf {
 }
 
 /// Ensures the base directory exists, then opens (or creates) the SQLite database.
-pub fn open_db() -> rusqlite::Result<rusqlite::Connection> {
+pub fn open_db() -> crate::error::Result<rusqlite::Connection> {
     let dir = base_dir();
-    std::fs::create_dir_all(&dir).expect("failed to create slashmem directory");
-    rusqlite::Connection::open(db_path())
+    std::fs::create_dir_all(&dir)?;
+    Ok(rusqlite::Connection::open(db_path())?)
 }
 
 #[cfg(test)]
@@ -69,6 +69,24 @@ mod tests {
 
         let path = db_path();
         assert_eq!(path, tmp.path().join("mem.db"));
+
+        unsafe { std::env::remove_var("SLASHMEM_DIR") };
+    }
+
+    #[test]
+    fn open_db_returns_error_on_bad_path() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // Point at a path where directory creation will fail:
+        // /dev/null is a file, so creating a subdirectory under it is impossible.
+        unsafe { std::env::set_var("SLASHMEM_DIR", "/dev/null/impossible") };
+
+        let result = open_db();
+        assert!(result.is_err(), "expected an IO error, got Ok");
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, crate::error::AppError::Io(_)),
+            "expected AppError::Io, got: {err:?}"
+        );
 
         unsafe { std::env::remove_var("SLASHMEM_DIR") };
     }
