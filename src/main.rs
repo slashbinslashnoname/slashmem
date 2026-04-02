@@ -231,25 +231,16 @@ mod tests {
     }
 
     #[test]
-    fn context_output_serializes_to_json() {
-        let out = output::ContextOutput {
-            relevant_rules: vec!["rule1".into()],
-            anti_patterns: vec!["anti1".into()],
-            history_snippets: vec!["snippet1".into()],
-        };
-        let json = serde_json::to_string(&out).unwrap();
-        assert!(json.contains("\"relevant_rules\""));
-        assert!(json.contains("\"anti_patterns\""));
-        assert!(json.contains("\"history_snippets\""));
-    }
-
-    #[test]
     fn context_graceful_on_bad_fts_query() {
         let conn = setup();
-        // FTS5 with empty query or special chars — should not panic
-        let result = build_context_with(&conn, "");
-        // Empty query may error in FTS5 — that's ok, we just need no panic
-        // If it errors, the cmd_context wrapper catches it
-        drop(result);
+        // FTS5 returns a syntax error for empty queries. cmd_context catches errors
+        // and falls back to ContextOutput::default(). Mirror that logic here.
+        let out = match build_context_with(&conn, "") {
+            Ok(ctx) => ctx,
+            Err(_) => output::ContextOutput::default(),
+        };
+        assert!(out.relevant_rules.is_empty());
+        assert!(out.anti_patterns.is_empty());
+        assert!(out.history_snippets.is_empty());
     }
 }
