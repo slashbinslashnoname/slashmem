@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, Row, params};
 use serde::Serialize;
 
 use crate::error;
@@ -22,6 +22,17 @@ pub struct InsertEpisodic<'a> {
     pub source: Option<&'a str>,
 }
 
+fn map_row(row: &Row<'_>) -> rusqlite::Result<EpisodicRow> {
+    Ok(EpisodicRow {
+        id: row.get(0)?,
+        content: row.get(1)?,
+        context: row.get(2)?,
+        agent: row.get(3)?,
+        timestamp: row.get(4)?,
+        source: row.get(5)?,
+    })
+}
+
 /// Insert an episodic record and return its rowid.
 pub fn insert(conn: &Connection, rec: &InsertEpisodic<'_>) -> error::Result<i64> {
     conn.execute(
@@ -37,21 +48,9 @@ pub fn recent(conn: &Connection, limit: u32) -> error::Result<Vec<EpisodicRow>> 
         "SELECT id, content, context, agent, timestamp, source \
          FROM episodic ORDER BY timestamp DESC, id DESC LIMIT ?1",
     )?;
-    let rows = stmt.query_map(params![limit], |row| {
-        Ok(EpisodicRow {
-            id: row.get(0)?,
-            content: row.get(1)?,
-            context: row.get(2)?,
-            agent: row.get(3)?,
-            timestamp: row.get(4)?,
-            source: row.get(5)?,
-        })
-    })?;
-    let mut result = Vec::new();
-    for r in rows {
-        result.push(r?);
-    }
-    Ok(result)
+    stmt.query_map(params![limit], map_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 /// Return episodic entries filtered by agent, newest first.
@@ -60,21 +59,9 @@ pub fn by_agent(conn: &Connection, agent: &str, limit: u32) -> error::Result<Vec
         "SELECT id, content, context, agent, timestamp, source \
          FROM episodic WHERE agent = ?1 ORDER BY timestamp DESC, id DESC LIMIT ?2",
     )?;
-    let rows = stmt.query_map(params![agent, limit], |row| {
-        Ok(EpisodicRow {
-            id: row.get(0)?,
-            content: row.get(1)?,
-            context: row.get(2)?,
-            agent: row.get(3)?,
-            timestamp: row.get(4)?,
-            source: row.get(5)?,
-        })
-    })?;
-    let mut result = Vec::new();
-    for r in rows {
-        result.push(r?);
-    }
-    Ok(result)
+    stmt.query_map(params![agent, limit], map_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 /// Return episodic entries newer than the given ISO-8601 timestamp, newest first.
@@ -83,21 +70,9 @@ pub fn since(conn: &Connection, since: &str, limit: u32) -> error::Result<Vec<Ep
         "SELECT id, content, context, agent, timestamp, source \
          FROM episodic WHERE timestamp > ?1 ORDER BY timestamp DESC, id DESC LIMIT ?2",
     )?;
-    let rows = stmt.query_map(params![since, limit], |row| {
-        Ok(EpisodicRow {
-            id: row.get(0)?,
-            content: row.get(1)?,
-            context: row.get(2)?,
-            agent: row.get(3)?,
-            timestamp: row.get(4)?,
-            source: row.get(5)?,
-        })
-    })?;
-    let mut result = Vec::new();
-    for r in rows {
-        result.push(r?);
-    }
-    Ok(result)
+    stmt.query_map(params![since, limit], map_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -132,10 +107,8 @@ mod tests {
     }
 
     #[test]
-    fn insert_content_required() {
+    fn insert_empty_content_is_valid() {
         let conn = setup();
-        // SQLite enforces NOT NULL on content — pass empty string is OK,
-        // but we verify the row is stored.
         let id = insert(&conn, &InsertEpisodic {
             content: "",
             context: None,
@@ -247,6 +220,18 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].content, "new");
         assert_eq!(rows[1].content, "mid");
+    }
+
+    #[test]
+    fn since_returns_empty_when_all_entries_are_older() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO episodic (content, timestamp) VALUES ('old', '2025-01-01 00:00:00')",
+            [],
+        ).unwrap();
+
+        let rows = since(&conn, "2025-12-01 00:00:00", 10).unwrap();
+        assert!(rows.is_empty());
     }
 
     #[test]
