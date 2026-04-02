@@ -220,16 +220,10 @@ fn context_returns_anti_patterns_in_separate_array() {
     let conn = open_db(&tmp);
 
     // Proven rule: high confidence, is_proven=1
+    // Note: no manual FTS insert — the schema trigger handles sync automatically.
     conn.execute(
         "INSERT INTO procedural (id, rule, success_count, confidence, is_proven, last_validated) \
          VALUES ('proven-deploy', 'Always run deploy checks', 10, 5.0, 1, datetime('now'))",
-        [],
-    )
-    .unwrap();
-    // Sync FTS
-    conn.execute(
-        "INSERT INTO procedural_fts(rowid, rule) \
-         SELECT rowid, rule FROM procedural WHERE id = 'proven-deploy'",
         [],
     )
     .unwrap();
@@ -238,12 +232,6 @@ fn context_returns_anti_patterns_in_separate_array() {
     conn.execute(
         "INSERT INTO procedural (id, rule, failure_count, confidence, is_anti_pattern, last_validated) \
          VALUES ('anti-deploy', 'Skip deploy validation', 4, -12.0, 1, datetime('now'))",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO procedural_fts(rowid, rule) \
-         SELECT rowid, rule FROM procedural WHERE id = 'anti-deploy'",
         [],
     )
     .unwrap();
