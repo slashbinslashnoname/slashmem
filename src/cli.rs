@@ -26,6 +26,63 @@ pub enum Commands {
     Distill,
     /// Show database health and record counts
     Status,
+    /// Manage procedural rules
+    Rules(RulesArgs),
+}
+
+/// Arguments for the `rules` subcommand.
+#[derive(clap::Args, Debug)]
+pub struct RulesArgs {
+    #[command(subcommand)]
+    pub action: RulesAction,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RulesAction {
+    /// List all procedural rules
+    List(RulesListArgs),
+    /// Add a new procedural rule
+    Add(RulesAddArgs),
+    /// Remove a procedural rule by ID
+    Rm(RulesRmArgs),
+    /// Show details of a single rule
+    Show(RulesShowArgs),
+}
+
+/// Arguments for `rules list`.
+#[derive(clap::Args, Debug)]
+pub struct RulesListArgs {
+    /// Filter rules by full-text search query
+    #[arg(long)]
+    pub query: Option<String>,
+}
+
+/// Arguments for `rules add`.
+#[derive(clap::Args, Debug)]
+pub struct RulesAddArgs {
+    /// Unique identifier for the rule
+    pub id: String,
+
+    /// Rule text
+    pub rule: String,
+
+    /// Source of the rule (e.g. "code-review", "postmortem")
+    #[arg(long)]
+    pub source: Option<String>,
+}
+
+/// Arguments for `rules rm`.
+#[derive(clap::Args, Debug)]
+pub struct RulesRmArgs {
+    /// ID of the rule to remove
+    pub id: String,
+}
+
+/// Arguments for `rules show`.
+#[derive(clap::Args, Debug)]
+pub struct RulesShowArgs {
+    /// ID of the rule to show
+    pub id: String,
 }
 
 /// Arguments for the `context` subcommand.
@@ -189,5 +246,90 @@ mod tests {
         let cli = Cli::parse_from(["sm", "--json", "status"]);
         assert!(cli.json);
         assert!(matches!(cli.command, Commands::Status));
+    }
+
+    #[test]
+    fn parse_rules_list() {
+        let cli = Cli::parse_from(["sm", "rules", "list"]);
+        match cli.command {
+            Commands::Rules(args) => match args.action {
+                RulesAction::List(list) => assert!(list.query.is_none()),
+                _ => panic!("expected List"),
+            },
+            _ => panic!("expected Rules command"),
+        }
+    }
+
+    #[test]
+    fn parse_rules_list_with_query() {
+        let cli = Cli::parse_from(["sm", "rules", "list", "--query", "deploy"]);
+        match cli.command {
+            Commands::Rules(args) => match args.action {
+                RulesAction::List(list) => assert_eq!(list.query.as_deref(), Some("deploy")),
+                _ => panic!("expected List"),
+            },
+            _ => panic!("expected Rules command"),
+        }
+    }
+
+    #[test]
+    fn parse_rules_add() {
+        let cli = Cli::parse_from(["sm", "rules", "add", "r1", "Always test"]);
+        match cli.command {
+            Commands::Rules(args) => match args.action {
+                RulesAction::Add(add) => {
+                    assert_eq!(add.id, "r1");
+                    assert_eq!(add.rule, "Always test");
+                    assert!(add.source.is_none());
+                }
+                _ => panic!("expected Add"),
+            },
+            _ => panic!("expected Rules command"),
+        }
+    }
+
+    #[test]
+    fn parse_rules_add_with_source() {
+        let cli = Cli::parse_from(["sm", "rules", "add", "r1", "test", "--source", "postmortem"]);
+        match cli.command {
+            Commands::Rules(args) => match args.action {
+                RulesAction::Add(add) => {
+                    assert_eq!(add.source.as_deref(), Some("postmortem"));
+                }
+                _ => panic!("expected Add"),
+            },
+            _ => panic!("expected Rules command"),
+        }
+    }
+
+    #[test]
+    fn parse_rules_rm() {
+        let cli = Cli::parse_from(["sm", "rules", "rm", "r1"]);
+        match cli.command {
+            Commands::Rules(args) => match args.action {
+                RulesAction::Rm(rm) => assert_eq!(rm.id, "r1"),
+                _ => panic!("expected Rm"),
+            },
+            _ => panic!("expected Rules command"),
+        }
+    }
+
+    #[test]
+    fn parse_rules_show() {
+        let cli = Cli::parse_from(["sm", "rules", "show", "r1"]);
+        match cli.command {
+            Commands::Rules(args) => match args.action {
+                RulesAction::Show(show) => assert_eq!(show.id, "r1"),
+                _ => panic!("expected Show"),
+            },
+            _ => panic!("expected Rules command"),
+        }
+    }
+
+    #[test]
+    fn parse_rules_with_json_flag() {
+        let cli = Cli::parse_from(["sm", "--json", "rules", "list"]);
+        assert!(cli.json);
+        assert!(matches!(cli.command, Commands::Rules(_)));
     }
 }

@@ -99,6 +99,114 @@ pub struct StatusOutput {
     pub schema_version: u32,
 }
 
+/// Summary of a single procedural rule (used in list output).
+#[derive(Debug, Serialize, PartialEq)]
+pub struct RuleSummary {
+    pub id: String,
+    pub rule: String,
+    pub confidence: f64,
+    pub is_proven: bool,
+    pub is_anti_pattern: bool,
+}
+
+/// JSON output for the `rules list` command.
+#[derive(Debug, Default, Serialize, PartialEq)]
+pub struct RulesListOutput {
+    pub rules: Vec<RuleSummary>,
+    pub count: u64,
+}
+
+impl RulesListOutput {
+    /// Render as compact human-readable text.
+    pub fn to_human(&self) -> String {
+        if self.rules.is_empty() {
+            return "no rules".to_string();
+        }
+        let mut lines: Vec<String> = Vec::with_capacity(self.rules.len() + 1);
+        lines.push(format!("{} rule(s)", self.count));
+        for r in &self.rules {
+            let flags = match (r.is_proven, r.is_anti_pattern) {
+                (true, _) => " [proven]",
+                (_, true) => " [anti]",
+                _ => "",
+            };
+            lines.push(format!(
+                "  {} | C={:.2}{} | {}",
+                r.id, r.confidence, flags, r.rule
+            ));
+        }
+        lines.join("\n")
+    }
+}
+
+/// JSON output for the `rules show` command.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct RuleShowOutput {
+    pub id: String,
+    pub rule: String,
+    pub success_count: u32,
+    pub failure_count: u32,
+    pub confidence: f64,
+    pub is_proven: bool,
+    pub is_anti_pattern: bool,
+    pub last_validated: Option<String>,
+    pub source: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl RuleShowOutput {
+    /// Render as compact human-readable text.
+    pub fn to_human(&self) -> String {
+        let flags = match (self.is_proven, self.is_anti_pattern) {
+            (true, _) => " [proven]",
+            (_, true) => " [anti]",
+            _ => "",
+        };
+        format!(
+            "{} | C={:.2}{} | S={} F={} | src={} | {}\n  {}",
+            self.id,
+            self.confidence,
+            flags,
+            self.success_count,
+            self.failure_count,
+            self.source.as_deref().unwrap_or("-"),
+            self.created_at,
+            self.rule,
+        )
+    }
+}
+
+/// JSON output for the `rules add` command.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct RuleAddOutput {
+    pub id: String,
+    pub created: bool,
+}
+
+impl RuleAddOutput {
+    pub fn to_human(&self) -> String {
+        format!("added rule {}", self.id)
+    }
+}
+
+/// JSON output for the `rules rm` command.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct RuleRmOutput {
+    pub id: String,
+    pub deleted: bool,
+}
+
+impl RuleRmOutput {
+    pub fn to_human(&self) -> String {
+        if self.deleted {
+            format!("removed rule {}", self.id)
+        } else {
+            format!("rule {} not found", self.id)
+        }
+    }
+}
+
 impl StatusOutput {
     /// Render as compact human-readable text.
     pub fn to_human(&self) -> String {
@@ -396,5 +504,201 @@ mod tests {
         let dis: serde_json::Map<String, serde_json::Value> =
             serde_json::from_str(&serde_json::to_string(&DistillOutput::default()).unwrap()).unwrap();
         assert_eq!(dis.len(), 3);
+    }
+
+    // --- rules output tests ---
+
+    #[test]
+    fn rules_list_output_default_serializes() {
+        let out = RulesListOutput::default();
+        let json = serde_json::to_value(&out).unwrap();
+        assert_eq!(json["rules"], serde_json::json!([]));
+        assert_eq!(json["count"], 0);
+    }
+
+    #[test]
+    fn rules_list_output_with_rules() {
+        let out = RulesListOutput {
+            rules: vec![RuleSummary {
+                id: "r1".into(),
+                rule: "Always test".into(),
+                confidence: 0.85,
+                is_proven: true,
+                is_anti_pattern: false,
+            }],
+            count: 1,
+        };
+        let json = serde_json::to_value(&out).unwrap();
+        assert_eq!(json["count"], 1);
+        assert_eq!(json["rules"][0]["id"], "r1");
+        assert_eq!(json["rules"][0]["is_proven"], true);
+    }
+
+    #[test]
+    fn rules_list_output_field_count() {
+        let out = RulesListOutput::default();
+        let map: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&serde_json::to_string(&out).unwrap()).unwrap();
+        assert_eq!(map.len(), 2); // rules, count
+    }
+
+    #[test]
+    fn rule_summary_field_count() {
+        let summary = RuleSummary {
+            id: "r1".into(),
+            rule: "test".into(),
+            confidence: 0.5,
+            is_proven: false,
+            is_anti_pattern: false,
+        };
+        let map: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&serde_json::to_string(&summary).unwrap()).unwrap();
+        assert_eq!(map.len(), 5);
+    }
+
+    #[test]
+    fn rules_list_to_human_empty() {
+        let out = RulesListOutput::default();
+        assert_eq!(out.to_human(), "no rules");
+    }
+
+    #[test]
+    fn rules_list_to_human_with_rules() {
+        let out = RulesListOutput {
+            rules: vec![
+                RuleSummary {
+                    id: "r1".into(),
+                    rule: "Always test".into(),
+                    confidence: 0.85,
+                    is_proven: true,
+                    is_anti_pattern: false,
+                },
+                RuleSummary {
+                    id: "r2".into(),
+                    rule: "Skip reviews".into(),
+                    confidence: -3.0,
+                    is_proven: false,
+                    is_anti_pattern: true,
+                },
+            ],
+            count: 2,
+        };
+        let human = out.to_human();
+        assert!(human.contains("2 rule(s)"));
+        assert!(human.contains("[proven]"));
+        assert!(human.contains("[anti]"));
+    }
+
+    #[test]
+    fn rule_show_output_serializes() {
+        let out = RuleShowOutput {
+            id: "r1".into(),
+            rule: "Always test".into(),
+            success_count: 5,
+            failure_count: 1,
+            confidence: 0.75,
+            is_proven: false,
+            is_anti_pattern: false,
+            last_validated: Some("2026-04-01".into()),
+            source: Some("review".into()),
+            created_at: "2026-01-01".into(),
+            updated_at: "2026-04-01".into(),
+        };
+        let json = serde_json::to_value(&out).unwrap();
+        assert_eq!(json["id"], "r1");
+        assert_eq!(json["success_count"], 5);
+        assert_eq!(json["failure_count"], 1);
+        assert_eq!(json["source"], "review");
+    }
+
+    #[test]
+    fn rule_show_output_field_count() {
+        let out = RuleShowOutput {
+            id: "r1".into(),
+            rule: "test".into(),
+            success_count: 0,
+            failure_count: 0,
+            confidence: 0.5,
+            is_proven: false,
+            is_anti_pattern: false,
+            last_validated: None,
+            source: None,
+            created_at: "2026-01-01".into(),
+            updated_at: "2026-01-01".into(),
+        };
+        let map: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&serde_json::to_string(&out).unwrap()).unwrap();
+        assert_eq!(map.len(), 11);
+    }
+
+    #[test]
+    fn rule_add_output_serializes() {
+        let out = RuleAddOutput {
+            id: "r1".into(),
+            created: true,
+        };
+        let json = serde_json::to_value(&out).unwrap();
+        assert_eq!(json["id"], "r1");
+        assert_eq!(json["created"], true);
+    }
+
+    #[test]
+    fn rule_add_to_human() {
+        let out = RuleAddOutput {
+            id: "r1".into(),
+            created: true,
+        };
+        assert_eq!(out.to_human(), "added rule r1");
+    }
+
+    #[test]
+    fn rule_rm_output_serializes() {
+        let out = RuleRmOutput {
+            id: "r1".into(),
+            deleted: true,
+        };
+        let json = serde_json::to_value(&out).unwrap();
+        assert_eq!(json["id"], "r1");
+        assert_eq!(json["deleted"], true);
+    }
+
+    #[test]
+    fn rule_rm_to_human_deleted() {
+        let out = RuleRmOutput {
+            id: "r1".into(),
+            deleted: true,
+        };
+        assert_eq!(out.to_human(), "removed rule r1");
+    }
+
+    #[test]
+    fn rule_rm_to_human_not_found() {
+        let out = RuleRmOutput {
+            id: "r1".into(),
+            deleted: false,
+        };
+        assert_eq!(out.to_human(), "rule r1 not found");
+    }
+
+    #[test]
+    fn rule_show_to_human() {
+        let out = RuleShowOutput {
+            id: "r1".into(),
+            rule: "Always test".into(),
+            success_count: 5,
+            failure_count: 0,
+            confidence: 0.85,
+            is_proven: true,
+            is_anti_pattern: false,
+            last_validated: None,
+            source: Some("review".into()),
+            created_at: "2026-01-01".into(),
+            updated_at: "2026-04-01".into(),
+        };
+        let human = out.to_human();
+        assert!(human.contains("r1"));
+        assert!(human.contains("[proven]"));
+        assert!(human.contains("Always test"));
+        assert!(human.contains("src=review"));
     }
 }

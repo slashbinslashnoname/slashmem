@@ -22,6 +22,7 @@ fn main() {
         Commands::Ingest(args) => cmd_ingest(args, &fmt),
         Commands::Distill => cmd_distill(&fmt),
         Commands::Status => cmd_status(&fmt),
+        Commands::Rules(args) => cmd_rules(args, &fmt),
     };
 
     if let Err(e) = result {
@@ -212,6 +213,144 @@ fn build_status(conn: &rusqlite::Connection) -> error::Result<output::StatusOutp
             procedural: count("procedural")?,
         },
         schema_version: SCHEMA_VERSION,
+    })
+}
+
+// --- rules subcommand ---
+
+fn cmd_rules(args: cli::RulesArgs, fmt: &format::FormatContext) -> error::Result<()> {
+    match args.action {
+        cli::RulesAction::List(list_args) => cmd_rules_list(list_args, fmt),
+        cli::RulesAction::Add(add_args) => cmd_rules_add(add_args, fmt),
+        cli::RulesAction::Rm(rm_args) => cmd_rules_rm(rm_args, fmt),
+        cli::RulesAction::Show(show_args) => cmd_rules_show(show_args, fmt),
+    }
+}
+
+fn cmd_rules_list(args: cli::RulesListArgs, fmt: &format::FormatContext) -> error::Result<()> {
+    let conn = db::init::open_db()?;
+    schema::ensure_schema(&conn)?;
+    let out = build_rules_list(&conn, args.query.as_deref())?;
+    if !fmt.is_quiet() {
+        if fmt.use_json() {
+            println!("{}", serde_json::to_string(&out)?);
+        } else {
+            println!("{}", out.to_human());
+        }
+    }
+    Ok(())
+}
+
+fn build_rules_list(
+    conn: &rusqlite::Connection,
+    query: Option<&str>,
+) -> error::Result<output::RulesListOutput> {
+    let rules = if let Some(q) = query {
+        db::procedural::search(conn, q, PROCEDURAL_SEARCH_LIMIT)?
+    } else {
+        db::procedural::all(conn)?
+    };
+    let summaries: Vec<output::RuleSummary> = rules
+        .iter()
+        .map(|r| output::RuleSummary {
+            id: r.id.clone(),
+            rule: r.rule.clone(),
+            confidence: r.confidence,
+            is_proven: r.is_proven,
+            is_anti_pattern: r.is_anti_pattern,
+        })
+        .collect();
+    let count = summaries.len() as u64;
+    Ok(output::RulesListOutput {
+        rules: summaries,
+        count,
+    })
+}
+
+fn cmd_rules_add(args: cli::RulesAddArgs, fmt: &format::FormatContext) -> error::Result<()> {
+    let conn = db::init::open_db()?;
+    schema::ensure_schema(&conn)?;
+    let out = build_rules_add(&conn, &args.id, &args.rule, args.source.as_deref())?;
+    if !fmt.is_quiet() {
+        if fmt.use_json() {
+            println!("{}", serde_json::to_string(&out)?);
+        } else {
+            println!("{}", out.to_human());
+        }
+    }
+    Ok(())
+}
+
+fn build_rules_add(
+    conn: &rusqlite::Connection,
+    id: &str,
+    rule: &str,
+    source: Option<&str>,
+) -> error::Result<output::RuleAddOutput> {
+    db::procedural::insert(conn, id, rule, source)?;
+    Ok(output::RuleAddOutput {
+        id: id.to_string(),
+        created: true,
+    })
+}
+
+fn cmd_rules_rm(args: cli::RulesRmArgs, fmt: &format::FormatContext) -> error::Result<()> {
+    let conn = db::init::open_db()?;
+    schema::ensure_schema(&conn)?;
+    let out = build_rules_rm(&conn, &args.id)?;
+    if !fmt.is_quiet() {
+        if fmt.use_json() {
+            println!("{}", serde_json::to_string(&out)?);
+        } else {
+            println!("{}", out.to_human());
+        }
+    }
+    Ok(())
+}
+
+fn build_rules_rm(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> error::Result<output::RuleRmOutput> {
+    let deleted = db::procedural::delete(conn, id)?;
+    Ok(output::RuleRmOutput {
+        id: id.to_string(),
+        deleted,
+    })
+}
+
+fn cmd_rules_show(args: cli::RulesShowArgs, fmt: &format::FormatContext) -> error::Result<()> {
+    let conn = db::init::open_db()?;
+    schema::ensure_schema(&conn)?;
+    let out = build_rules_show(&conn, &args.id)?;
+    if !fmt.is_quiet() {
+        if fmt.use_json() {
+            println!("{}", serde_json::to_string(&out)?);
+        } else {
+            println!("{}", out.to_human());
+        }
+    }
+    Ok(())
+}
+
+fn build_rules_show(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> error::Result<output::RuleShowOutput> {
+    let rule = db::procedural::get(conn, id)?
+        .ok_or_else(|| error::AppError::NotFound(id.to_string()))?;
+    Ok(output::RuleShowOutput {
+        id: rule.id,
+        rule: rule.rule,
+        success_count: rule.success_count,
+        failure_count: rule.failure_count,
+        confidence: rule.confidence,
+        is_proven: rule.is_proven,
+        is_anti_pattern: rule.is_anti_pattern,
+        last_validated: rule.last_validated,
+        source: rule.source,
+        created_at: rule.created_at,
+        updated_at: rule.updated_at,
     })
 }
 
@@ -839,5 +978,155 @@ mod tests {
         // should silently return without writing anything.
         warn_degraded();
         // No panic, no output — the function is safe to call in non-TTY contexts.
+    }
+
+    // --- rules tests ---
+
+    #[test]
+    fn rules_list_empty_db() {
+        let conn = test_conn();
+        let out = build_rules_list(&conn, None).unwrap();
+        assert_eq!(out.count, 0);
+        assert!(out.rules.is_empty());
+    }
+
+    #[test]
+    fn rules_list_returns_all_rules() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "rule one", None).unwrap();
+        db::procedural::insert(&conn, "r2", "rule two", Some("review")).unwrap();
+
+        let out = build_rules_list(&conn, None).unwrap();
+        assert_eq!(out.count, 2);
+        assert_eq!(out.rules.len(), 2);
+    }
+
+    #[test]
+    fn rules_list_with_query_filters() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "Always validate deploy inputs", None).unwrap();
+        db::procedural::insert(&conn, "r2", "Use connection pooling", None).unwrap();
+
+        let out = build_rules_list(&conn, Some("validate")).unwrap();
+        assert_eq!(out.count, 1);
+        assert_eq!(out.rules[0].id, "r1");
+    }
+
+    #[test]
+    fn rules_list_query_no_match() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "some rule", None).unwrap();
+
+        let out = build_rules_list(&conn, Some("nonexistent")).unwrap();
+        assert_eq!(out.count, 0);
+    }
+
+    #[test]
+    fn rules_list_output_serializes() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "rule one", None).unwrap();
+        let out = build_rules_list(&conn, None).unwrap();
+        let json: serde_json::Value = serde_json::to_value(&out).unwrap();
+        assert_eq!(json["count"], 1);
+        assert!(json["rules"].is_array());
+        assert_eq!(json["rules"][0]["id"], "r1");
+        assert_eq!(json["rules"][0]["rule"], "rule one");
+    }
+
+    #[test]
+    fn rules_add_creates_rule() {
+        let conn = test_conn();
+        let out = build_rules_add(&conn, "r1", "Always test", Some("postmortem")).unwrap();
+        assert_eq!(out.id, "r1");
+        assert!(out.created);
+
+        let rule = db::procedural::get(&conn, "r1").unwrap().unwrap();
+        assert_eq!(rule.rule, "Always test");
+        assert_eq!(rule.source.as_deref(), Some("postmortem"));
+    }
+
+    #[test]
+    fn rules_add_duplicate_errors() {
+        let conn = test_conn();
+        build_rules_add(&conn, "r1", "first", None).unwrap();
+        assert!(build_rules_add(&conn, "r1", "second", None).is_err());
+    }
+
+    #[test]
+    fn rules_add_output_serializes() {
+        let conn = test_conn();
+        let out = build_rules_add(&conn, "r1", "rule text", None).unwrap();
+        let json: serde_json::Value = serde_json::to_value(&out).unwrap();
+        assert_eq!(json["id"], "r1");
+        assert_eq!(json["created"], true);
+    }
+
+    #[test]
+    fn rules_rm_deletes_existing() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "rule to delete", None).unwrap();
+
+        let out = build_rules_rm(&conn, "r1").unwrap();
+        assert_eq!(out.id, "r1");
+        assert!(out.deleted);
+        assert!(db::procedural::get(&conn, "r1").unwrap().is_none());
+    }
+
+    #[test]
+    fn rules_rm_missing_returns_false() {
+        let conn = test_conn();
+        let out = build_rules_rm(&conn, "nonexistent").unwrap();
+        assert!(!out.deleted);
+    }
+
+    #[test]
+    fn rules_show_existing_rule() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "Always test", Some("review")).unwrap();
+
+        let out = build_rules_show(&conn, "r1").unwrap();
+        assert_eq!(out.id, "r1");
+        assert_eq!(out.rule, "Always test");
+        assert_eq!(out.source.as_deref(), Some("review"));
+        assert_eq!(out.success_count, 0);
+        assert_eq!(out.failure_count, 0);
+    }
+
+    #[test]
+    fn rules_show_missing_returns_not_found() {
+        let conn = test_conn();
+        let result = build_rules_show(&conn, "nonexistent");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            error::AppError::NotFound(msg) => assert_eq!(msg, "nonexistent"),
+            other => panic!("expected NotFound, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rules_show_output_serializes() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "rule text", None).unwrap();
+        let out = build_rules_show(&conn, "r1").unwrap();
+        let json: serde_json::Value = serde_json::to_value(&out).unwrap();
+        assert_eq!(json["id"], "r1");
+        assert_eq!(json["rule"], "rule text");
+        assert!(json["confidence"].is_f64());
+        assert_eq!(json["is_proven"], false);
+        assert_eq!(json["is_anti_pattern"], false);
+    }
+
+    #[test]
+    fn rules_show_reflects_validation_counts() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "test rule", None).unwrap();
+        db::procedural::record_success(&conn, "r1").unwrap();
+        db::procedural::record_success(&conn, "r1").unwrap();
+        db::procedural::record_failure(&conn, "r1").unwrap();
+
+        let out = build_rules_show(&conn, "r1").unwrap();
+        assert_eq!(out.success_count, 2);
+        assert_eq!(out.failure_count, 1);
+        assert!(out.last_validated.is_some());
     }
 }

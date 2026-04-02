@@ -187,6 +187,12 @@ pub fn prune_safe(conn: &Connection, threshold: f64) -> crate::error::Result<u32
     Ok(deleted as u32)
 }
 
+/// Delete a single rule by id. Returns true if a row was deleted.
+pub fn delete(conn: &Connection, id: &str) -> crate::error::Result<bool> {
+    let changed = conn.execute("DELETE FROM procedural WHERE id = ?1", params![id])?;
+    Ok(changed > 0)
+}
+
 /// Return all rules currently marked as proven (is_proven = 1).
 pub fn proven_rules(conn: &Connection) -> crate::error::Result<Vec<ProceduralRule>> {
     let mut stmt = conn.prepare(&format!(

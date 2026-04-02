@@ -349,6 +349,153 @@ fn status_counts_after_ingest() {
 }
 
 // ---------------------------------------------------------------------------
+// 9. rules list on empty DB returns empty array
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rules_list_empty_db_returns_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Create DB via a dummy command
+    run_sm(&tmp, &["context", "init"]);
+
+    let output = run_sm(&tmp, &["rules", "list"]);
+    let json = parse_stdout(&output);
+    assert_eq!(json["count"], 0);
+    assert_eq!(json["rules"], serde_json::json!([]));
+}
+
+// ---------------------------------------------------------------------------
+// 10. rules add + list round-trip
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rules_add_then_list() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let add_out = run_sm(&tmp, &["rules", "add", "r1", "Always run tests"]);
+    let json = parse_stdout(&add_out);
+    assert_eq!(json["id"], "r1");
+    assert_eq!(json["created"], true);
+
+    let list_out = run_sm(&tmp, &["rules", "list"]);
+    let json = parse_stdout(&list_out);
+    assert_eq!(json["count"], 1);
+    assert_eq!(json["rules"][0]["id"], "r1");
+    assert_eq!(json["rules"][0]["rule"], "Always run tests");
+}
+
+// ---------------------------------------------------------------------------
+// 11. rules add with --source
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rules_add_with_source() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = run_sm(
+        &tmp,
+        &["rules", "add", "r1", "Use prepared statements", "--source", "code-review"],
+    );
+    let json = parse_stdout(&output);
+    assert_eq!(json["id"], "r1");
+
+    // Verify via show
+    let show_out = run_sm(&tmp, &["rules", "show", "r1"]);
+    let json = parse_stdout(&show_out);
+    assert_eq!(json["source"], "code-review");
+}
+
+// ---------------------------------------------------------------------------
+// 12. rules show returns full detail
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rules_show_returns_detail() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    run_sm(&tmp, &["rules", "add", "r1", "Always validate input"]);
+    let output = run_sm(&tmp, &["rules", "show", "r1"]);
+    let json = parse_stdout(&output);
+
+    assert_eq!(json["id"], "r1");
+    assert_eq!(json["rule"], "Always validate input");
+    assert_eq!(json["success_count"], 0);
+    assert_eq!(json["failure_count"], 0);
+    assert!(json["confidence"].is_f64());
+    assert_eq!(json["is_proven"], false);
+    assert_eq!(json["is_anti_pattern"], false);
+}
+
+// ---------------------------------------------------------------------------
+// 13. rules show missing rule returns error
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rules_show_missing_returns_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Create DB first
+    run_sm(&tmp, &["context", "init"]);
+
+    let output = run_sm(&tmp, &["rules", "show", "nonexistent"]);
+    assert!(!output.status.success());
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["error"]["code"], "NOT_FOUND");
+}
+
+// ---------------------------------------------------------------------------
+// 14. rules rm deletes a rule
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rules_rm_deletes_rule() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    run_sm(&tmp, &["rules", "add", "r1", "rule to delete"]);
+
+    let rm_out = run_sm(&tmp, &["rules", "rm", "r1"]);
+    let json = parse_stdout(&rm_out);
+    assert_eq!(json["id"], "r1");
+    assert_eq!(json["deleted"], true);
+
+    // Verify it's gone
+    let list_out = run_sm(&tmp, &["rules", "list"]);
+    let json = parse_stdout(&list_out);
+    assert_eq!(json["count"], 0);
+}
+
+// ---------------------------------------------------------------------------
+// 15. rules rm missing returns deleted=false
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rules_rm_missing_returns_false() {
+    let tmp = tempfile::tempdir().unwrap();
+    run_sm(&tmp, &["context", "init"]);
+
+    let output = run_sm(&tmp, &["rules", "rm", "nonexistent"]);
+    let json = parse_stdout(&output);
+    assert_eq!(json["deleted"], false);
+}
+
+// ---------------------------------------------------------------------------
+// 16. rules list --query filters results
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rules_list_with_query_filters() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    run_sm(&tmp, &["rules", "add", "r1", "Always validate deploy inputs"]);
+    run_sm(&tmp, &["rules", "add", "r2", "Use connection pooling for databases"]);
+
+    let output = run_sm(&tmp, &["rules", "list", "--query", "validate"]);
+    let json = parse_stdout(&output);
+    assert_eq!(json["count"], 1);
+    assert_eq!(json["rules"][0]["id"], "r1");
+}
+
+// ---------------------------------------------------------------------------
 // Bonus: distill on empty DB returns zeros
 // ---------------------------------------------------------------------------
 
