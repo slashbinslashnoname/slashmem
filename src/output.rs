@@ -118,7 +118,7 @@ impl HelpOutput {
         out.push_str("\nExit codes: ");
         let codes: Vec<String> = self.exit_codes.iter().map(|e| format!("{}={}", e.code, e.meaning)).collect();
         out.push_str(&codes.join(", "));
-        out.push_str("\n\nRun `sm <command> --help` for details.");
+        out.push_str("\n\nRun `sm <command> --help` for details.\n");
         out
     }
 }
