@@ -11,6 +11,7 @@ use std::io::IsTerminal;
 
 use clap::Parser;
 use cli::{Cli, Commands};
+use output::Render;
 
 fn main() {
     let cli = Cli::parse();
@@ -23,7 +24,8 @@ fn main() {
     };
 
     if let Err(e) = result {
-        eprintln!("error: {e}");
+        let err_out = output::ErrorOutput::from_app_error(&e);
+        err_out.render(&fmt);
         std::process::exit(e.exit_code());
     }
 }
