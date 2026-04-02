@@ -1,57 +1,27 @@
 use serde::Serialize;
 
 /// JSON output for the `context` command.
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Default, Serialize, PartialEq)]
 pub struct ContextOutput {
     pub relevant_rules: Vec<String>,
     pub anti_patterns: Vec<String>,
     pub history_snippets: Vec<String>,
 }
 
-impl Default for ContextOutput {
-    fn default() -> Self {
-        Self {
-            relevant_rules: vec![],
-            anti_patterns: vec![],
-            history_snippets: vec![],
-        }
-    }
-}
-
 /// JSON output for the `ingest` command.
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Default, Serialize, PartialEq)]
 pub struct IngestOutput {
     pub episodic_id: Option<String>,
     pub proposed_rules: Vec<String>,
     pub validated_rules: Vec<String>,
 }
 
-impl Default for IngestOutput {
-    fn default() -> Self {
-        Self {
-            episodic_id: None,
-            proposed_rules: vec![],
-            validated_rules: vec![],
-        }
-    }
-}
-
 /// JSON output for the `distill` command.
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Default, Serialize, PartialEq)]
 pub struct DistillOutput {
     pub decayed: u64,
     pub pruned: u64,
     pub transitioned: u64,
-}
-
-impl Default for DistillOutput {
-    fn default() -> Self {
-        Self {
-            decayed: 0,
-            pruned: 0,
-            transitioned: 0,
-        }
-    }
 }
 
 #[cfg(test)]
