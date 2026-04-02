@@ -310,6 +310,45 @@ fn multiple_ingests_accumulate() {
 }
 
 // ---------------------------------------------------------------------------
+// 7. status on empty DB returns ok with zero counts
+// ---------------------------------------------------------------------------
+
+#[test]
+fn status_empty_db_returns_ok_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["status"]);
+    let json = parse_stdout(&output);
+
+    assert_eq!(json["ok"], true);
+    assert!(json["db_path"].as_str().unwrap().contains("mem.db"));
+    assert_eq!(json["counts"]["episodic"], 0);
+    assert_eq!(json["counts"]["working"], 0);
+    assert_eq!(json["counts"]["procedural"], 0);
+    assert_eq!(json["schema_version"], 1);
+}
+
+// ---------------------------------------------------------------------------
+// 8. status reflects record counts after ingestion
+// ---------------------------------------------------------------------------
+
+#[test]
+fn status_counts_after_ingest() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    // Ingest a few records
+    run_sm(&tmp, &["ingest", "--task", "T-1", "--body", "one", "--agent", "a"]);
+    run_sm(&tmp, &["ingest", "--task", "T-2", "--body", "two", "--agent", "a"]);
+
+    let output = run_sm(&tmp, &["status"]);
+    let json = parse_stdout(&output);
+
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["counts"]["episodic"], 2);
+    assert_eq!(json["counts"]["working"], 2);
+    assert_eq!(json["counts"]["procedural"], 0);
+}
+
+// ---------------------------------------------------------------------------
 // Bonus: distill on empty DB returns zeros
 // ---------------------------------------------------------------------------
 

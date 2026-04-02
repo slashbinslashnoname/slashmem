@@ -78,6 +78,42 @@ fn distill_exits_zero_with_default_json_on_missing_db() {
     assert_eq!(json["transitioned"], 0);
 }
 
+#[test]
+fn status_exits_zero_with_fallback_json_on_missing_db() {
+    let tmp = bad_slashmem_dir();
+    let output = sm_bin()
+        .env("SLASHMEM_DIR", bad_dir_path(&tmp))
+        .args(["status"])
+        .output()
+        .expect("failed to run sm");
+
+    assert!(output.status.success(), "expected exit 0, got {:?}", output.status);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .expect("stdout should be valid JSON");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["counts"]["episodic"], 0);
+    assert_eq!(json["counts"]["working"], 0);
+    assert_eq!(json["counts"]["procedural"], 0);
+    assert_eq!(json["schema_version"], 1);
+}
+
+#[test]
+fn status_stderr_empty_when_not_tty() {
+    let tmp = bad_slashmem_dir();
+    let output = sm_bin()
+        .env("SLASHMEM_DIR", bad_dir_path(&tmp))
+        .args(["status"])
+        .output()
+        .expect("failed to run sm");
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.is_empty(),
+        "expected no stderr when not a TTY, got: {stderr}"
+    );
+}
+
 /// When stderr is NOT a terminal (e.g. captured by `.output()`), the degradation
 /// warning should be suppressed to keep agent pipelines clean.
 #[test]

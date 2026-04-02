@@ -24,6 +24,8 @@ pub enum Commands {
     Ingest(IngestArgs),
     /// Run confidence decay, maturity transitions, and pruning
     Distill,
+    /// Show database health and record counts
+    Status,
 }
 
 /// Arguments for the `context` subcommand.
@@ -174,5 +176,18 @@ mod tests {
     fn parse_distill_command() {
         let cli = Cli::parse_from(["sm", "distill"]);
         assert!(matches!(cli.command, Commands::Distill));
+    }
+
+    #[test]
+    fn parse_status_command() {
+        let cli = Cli::parse_from(["sm", "status"]);
+        assert!(matches!(cli.command, Commands::Status));
+    }
+
+    #[test]
+    fn parse_status_with_json_flag() {
+        let cli = Cli::parse_from(["sm", "--json", "status"]);
+        assert!(cli.json);
+        assert!(matches!(cli.command, Commands::Status));
     }
 }

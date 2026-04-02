@@ -19,6 +19,7 @@ fn main() {
         Commands::Context(args) => cmd_context(args, &fmt),
         Commands::Ingest(args) => cmd_ingest(args, &fmt),
         Commands::Distill => cmd_distill(&fmt),
+        Commands::Status => cmd_status(&fmt),
     };
 
     if let Err(e) = result {
@@ -159,6 +160,56 @@ fn cmd_distill(fmt: &format::FormatContext) -> error::Result<()> {
         println!("{}", serde_json::to_string(&out)?);
     }
     Ok(())
+}
+
+/// Current schema version — bump when schema.rs changes structurally.
+const SCHEMA_VERSION: u32 = 1;
+
+fn cmd_status(fmt: &format::FormatContext) -> error::Result<()> {
+    let out = match try_status() {
+        Ok(s) => s,
+        Err(_) => {
+            warn_degraded();
+            output::StatusOutput {
+                ok: false,
+                db_path: db::init::db_path().display().to_string(),
+                counts: output::RecordCounts::default(),
+                schema_version: SCHEMA_VERSION,
+            }
+        }
+    };
+    if !fmt.is_quiet() {
+        if fmt.use_json() {
+            println!("{}", serde_json::to_string(&out)?);
+        } else {
+            println!("{}", out.to_human());
+        }
+    }
+    Ok(())
+}
+
+fn try_status() -> error::Result<output::StatusOutput> {
+    let conn = db::init::open_db()?;
+    schema::ensure_schema(&conn)?;
+    build_status(&conn)
+}
+
+fn build_status(conn: &rusqlite::Connection) -> error::Result<output::StatusOutput> {
+    let count = |table: &str| -> error::Result<u64> {
+        let sql = format!("SELECT COUNT(*) FROM {table}");
+        Ok(conn.query_row(&sql, [], |r| r.get::<_, i64>(0))? as u64)
+    };
+
+    Ok(output::StatusOutput {
+        ok: true,
+        db_path: db::init::db_path().display().to_string(),
+        counts: output::RecordCounts {
+            episodic: count("episodic")?,
+            working: count("working")?,
+            procedural: count("procedural")?,
+        },
+        schema_version: SCHEMA_VERSION,
+    })
 }
 
 fn try_distill() -> error::Result<output::DistillOutput> {
@@ -689,6 +740,94 @@ mod tests {
         assert_eq!(parsed["decayed"], 0);
         assert_eq!(parsed["pruned"], 0);
         assert_eq!(parsed["transitioned"], 0);
+    }
+
+    // --- status tests ---
+
+    #[test]
+    fn status_empty_db_returns_ok_with_zero_counts() {
+        let conn = test_conn();
+        let out = build_status(&conn).unwrap();
+        assert!(out.ok);
+        assert_eq!(out.counts.episodic, 0);
+        assert_eq!(out.counts.working, 0);
+        assert_eq!(out.counts.procedural, 0);
+        assert_eq!(out.schema_version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn status_counts_records() {
+        let conn = test_conn();
+
+        // Insert some records
+        db::episodic::insert(
+            &conn,
+            &db::episodic::InsertEpisodic {
+                content: "event 1",
+                context: None,
+                agent: None,
+                source: None,
+            },
+        )
+        .unwrap();
+        db::episodic::insert(
+            &conn,
+            &db::episodic::InsertEpisodic {
+                content: "event 2",
+                context: None,
+                agent: None,
+                source: None,
+            },
+        )
+        .unwrap();
+        db::working::insert(&conn, "summary", None, None, None).unwrap();
+        db::procedural::insert(&conn, "r1", "rule one", None).unwrap();
+        db::procedural::insert(&conn, "r2", "rule two", None).unwrap();
+        db::procedural::insert(&conn, "r3", "rule three", None).unwrap();
+
+        let out = build_status(&conn).unwrap();
+        assert!(out.ok);
+        assert_eq!(out.counts.episodic, 2);
+        assert_eq!(out.counts.working, 1);
+        assert_eq!(out.counts.procedural, 3);
+    }
+
+    #[test]
+    fn status_serializes_correct_json_shape() {
+        let conn = test_conn();
+        let out = build_status(&conn).unwrap();
+        let json: serde_json::Value = serde_json::to_value(&out).unwrap();
+        assert_eq!(json["ok"], true);
+        assert!(json["db_path"].is_string());
+        assert_eq!(json["counts"]["episodic"], 0);
+        assert_eq!(json["counts"]["working"], 0);
+        assert_eq!(json["counts"]["procedural"], 0);
+        assert_eq!(json["schema_version"], SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn status_degrades_on_missing_schema() {
+        let conn = broken_conn();
+        let result = build_status(&conn);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cmd_status_returns_ok_on_db_error() {
+        // Mirrors the degradation pattern: build_status fails, cmd_status
+        // returns a fallback with ok=false.
+        let conn = broken_conn();
+        let out = match build_status(&conn) {
+            Ok(s) => s,
+            Err(_) => output::StatusOutput {
+                ok: false,
+                db_path: db::init::db_path().display().to_string(),
+                counts: output::RecordCounts::default(),
+                schema_version: SCHEMA_VERSION,
+            },
+        };
+        assert!(!out.ok);
+        assert_eq!(out.counts, output::RecordCounts::default());
     }
 
     #[test]

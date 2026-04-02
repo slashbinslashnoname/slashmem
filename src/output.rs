@@ -24,6 +24,39 @@ pub struct DistillOutput {
     pub transitioned: u64,
 }
 
+/// Record counts per memory table.
+#[derive(Debug, Default, Serialize, PartialEq)]
+pub struct RecordCounts {
+    pub episodic: u64,
+    pub working: u64,
+    pub procedural: u64,
+}
+
+/// JSON output for the `status` command.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct StatusOutput {
+    pub ok: bool,
+    pub db_path: String,
+    pub counts: RecordCounts,
+    pub schema_version: u32,
+}
+
+impl StatusOutput {
+    /// Render as compact human-readable text.
+    pub fn to_human(&self) -> String {
+        let status = if self.ok { "ok" } else { "ERR" };
+        format!(
+            "{} | db: {} | episodic: {}, working: {}, procedural: {} | schema: v{}",
+            status,
+            self.db_path,
+            self.counts.episodic,
+            self.counts.working,
+            self.counts.procedural,
+            self.schema_version,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,6 +125,77 @@ mod tests {
         assert_eq!(json["decayed"], 5);
         assert_eq!(json["pruned"], 3);
         assert_eq!(json["transitioned"], 1);
+    }
+
+    #[test]
+    fn status_output_serializes_json_shape() {
+        let out = StatusOutput {
+            ok: true,
+            db_path: "/Users/slashbin/.slashmem/mem.db".into(),
+            counts: RecordCounts {
+                episodic: 142,
+                working: 37,
+                procedural: 18,
+            },
+            schema_version: 1,
+        };
+        let json = serde_json::to_value(&out).unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["db_path"], "/Users/slashbin/.slashmem/mem.db");
+        assert_eq!(json["counts"]["episodic"], 142);
+        assert_eq!(json["counts"]["working"], 37);
+        assert_eq!(json["counts"]["procedural"], 18);
+        assert_eq!(json["schema_version"], 1);
+    }
+
+    #[test]
+    fn status_output_field_count() {
+        let out = StatusOutput {
+            ok: true,
+            db_path: "/tmp/mem.db".into(),
+            counts: RecordCounts::default(),
+            schema_version: 1,
+        };
+        let map: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&serde_json::to_string(&out).unwrap()).unwrap();
+        assert_eq!(map.len(), 4); // ok, db_path, counts, schema_version
+    }
+
+    #[test]
+    fn record_counts_default_is_zeros() {
+        let counts = RecordCounts::default();
+        assert_eq!(counts.episodic, 0);
+        assert_eq!(counts.working, 0);
+        assert_eq!(counts.procedural, 0);
+    }
+
+    #[test]
+    fn status_to_human_ok() {
+        let out = StatusOutput {
+            ok: true,
+            db_path: "~/.slashmem/mem.db".into(),
+            counts: RecordCounts {
+                episodic: 142,
+                working: 37,
+                procedural: 18,
+            },
+            schema_version: 1,
+        };
+        assert_eq!(
+            out.to_human(),
+            "ok | db: ~/.slashmem/mem.db | episodic: 142, working: 37, procedural: 18 | schema: v1"
+        );
+    }
+
+    #[test]
+    fn status_to_human_err() {
+        let out = StatusOutput {
+            ok: false,
+            db_path: "/tmp/mem.db".into(),
+            counts: RecordCounts::default(),
+            schema_version: 1,
+        };
+        assert!(out.to_human().starts_with("ERR"));
     }
 
     #[test]
