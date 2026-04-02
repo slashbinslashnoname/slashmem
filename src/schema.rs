@@ -73,6 +73,7 @@ END";
 const TRIGGER_PROCEDURAL_FTS_UPDATE: &str = "
 CREATE TRIGGER IF NOT EXISTS procedural_fts_update
 AFTER UPDATE ON procedural
+WHEN OLD.rule IS NOT NEW.rule
 BEGIN
     INSERT INTO procedural_fts(procedural_fts, rowid, rule) VALUES ('delete', OLD.rowid, OLD.rule);
     INSERT INTO procedural_fts(rowid, rule) VALUES (NEW.rowid, NEW.rule);
@@ -96,6 +97,7 @@ END";
 const TRIGGER_WORKING_FTS_UPDATE: &str = "
 CREATE TRIGGER IF NOT EXISTS working_fts_update
 AFTER UPDATE ON working
+WHEN OLD.summary IS NOT NEW.summary OR OLD.body IS NOT NEW.body
 BEGIN
     INSERT INTO working_fts(working_fts, rowid, summary, body) VALUES ('delete', OLD.id, OLD.summary, OLD.body);
     INSERT INTO working_fts(rowid, summary, body) VALUES (NEW.id, NEW.summary, NEW.body);
@@ -544,6 +546,79 @@ mod tests {
         assert_eq!(count, 0);
 
         // FTS5 internal integrity-check
+        conn.execute_batch(
+            "INSERT INTO working_fts(working_fts) VALUES('integrity-check')",
+        )
+        .unwrap();
+    }
+
+    /// Updating a non-rule column (e.g. success_count) must NOT cause a
+    /// redundant FTS delete+re-insert.  We verify by checking that a
+    /// metadata-only update still passes an FTS integrity-check and that
+    /// the FTS index contains exactly the expected content.
+    #[test]
+    fn procedural_fts_skips_non_rule_update() {
+        let conn = mem_db();
+        ensure_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO procedural (id, rule) VALUES ('r1', 'always review')",
+            [],
+        )
+        .unwrap();
+
+        // Update only metadata — rule is unchanged
+        conn.execute(
+            "UPDATE procedural SET success_count = 5 WHERE id = 'r1'",
+            [],
+        )
+        .unwrap();
+
+        // FTS should still find the original rule text
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM procedural_fts WHERE procedural_fts MATCH 'review'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Integrity-check passes — no phantom rows from redundant delete+insert
+        conn.execute_batch(
+            "INSERT INTO procedural_fts(procedural_fts) VALUES('integrity-check')",
+        )
+        .unwrap();
+    }
+
+    /// Updating a non-indexed column on working must not trigger FTS sync.
+    #[test]
+    fn working_fts_skips_non_content_update() {
+        let conn = mem_db();
+        ensure_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO working (summary, body, task_id) VALUES ('deploy', 'canary rollout', 'T-1')",
+            [],
+        )
+        .unwrap();
+
+        // Update only task_id — summary and body unchanged
+        conn.execute(
+            "UPDATE working SET task_id = 'T-2' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM working_fts WHERE working_fts MATCH 'canary'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
         conn.execute_batch(
             "INSERT INTO working_fts(working_fts) VALUES('integrity-check')",
         )
