@@ -1,4 +1,5 @@
 pub mod confidence;
+pub mod db;
 
 use clap::Parser;
 
