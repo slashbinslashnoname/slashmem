@@ -425,6 +425,131 @@ mod tests {
         assert_eq!(source, "migration-test");
     }
 
+    /// R1: Run ensure_schema() twice and introspect PRAGMA table_info to confirm
+    /// all expected columns exist after both calls — no errors, no missing columns.
+    #[test]
+    fn ensure_schema_idempotent_with_pragma_introspection() {
+        let conn = mem_db();
+        ensure_schema(&conn).unwrap();
+        ensure_schema(&conn).unwrap();
+
+        fn column_names(conn: &Connection, table: &str) -> Vec<String> {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA table_info('{table}')"))
+                .unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        }
+
+        let ep = column_names(&conn, "episodic");
+        for col in ["id", "content", "context", "agent", "timestamp", "source"] {
+            assert!(ep.contains(&col.to_string()), "episodic missing {col}");
+        }
+
+        let wk = column_names(&conn, "working");
+        for col in ["id", "summary", "body", "task_id", "agent", "created_at"] {
+            assert!(wk.contains(&col.to_string()), "working missing {col}");
+        }
+
+        let pr = column_names(&conn, "procedural");
+        for col in [
+            "id",
+            "rule",
+            "success_count",
+            "failure_count",
+            "confidence",
+            "is_anti_pattern",
+            "is_proven",
+            "last_validated",
+            "source",
+            "created_at",
+            "updated_at",
+        ] {
+            assert!(pr.contains(&col.to_string()), "procedural missing {col}");
+        }
+    }
+
+    /// R2: FTS5 integrity-check on procedural_fts after insert + delete cycle.
+    #[test]
+    fn procedural_fts_integrity_check() {
+        let conn = mem_db();
+        ensure_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO procedural (id, rule) VALUES ('ic1', 'integrity check rule')",
+            [],
+        )
+        .unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM procedural_fts WHERE procedural_fts MATCH 'integrity'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        conn.execute("DELETE FROM procedural WHERE id = 'ic1'", [])
+            .unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM procedural_fts WHERE procedural_fts MATCH 'integrity'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+
+        // FTS5 internal integrity-check — errors if index is corrupt
+        conn.execute_batch(
+            "INSERT INTO procedural_fts(procedural_fts) VALUES('integrity-check')",
+        )
+        .unwrap();
+    }
+
+    /// R2: FTS5 integrity-check on working_fts after insert + delete cycle.
+    #[test]
+    fn working_fts_integrity_check() {
+        let conn = mem_db();
+        ensure_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO working (summary, body) VALUES ('deploy pipeline', 'add canary stage')",
+            [],
+        )
+        .unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM working_fts WHERE working_fts MATCH 'canary'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        conn.execute("DELETE FROM working WHERE id = 1", []).unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM working_fts WHERE working_fts MATCH 'canary'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+
+        // FTS5 internal integrity-check
+        conn.execute_batch(
+            "INSERT INTO working_fts(working_fts) VALUES('integrity-check')",
+        )
+        .unwrap();
+    }
+
     #[test]
     fn procedural_updated_at_trigger() {
         let conn = mem_db();
