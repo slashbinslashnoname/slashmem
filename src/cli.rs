@@ -28,6 +28,8 @@ pub enum Commands {
     Status,
     /// Manage procedural rules
     Rules(RulesArgs),
+    /// Display agent integration prompt (for CLAUDE.md / system prompts)
+    Prompt,
 }
 
 /// Arguments for the `rules` subcommand.
@@ -324,6 +326,19 @@ mod tests {
             },
             _ => panic!("expected Rules command"),
         }
+    }
+
+    #[test]
+    fn parse_prompt_command() {
+        let cli = Cli::parse_from(["sm", "prompt"]);
+        assert!(matches!(cli.command, Some(Commands::Prompt)));
+    }
+
+    #[test]
+    fn parse_prompt_with_json_flag() {
+        let cli = Cli::parse_from(["sm", "--json", "prompt"]);
+        assert!(cli.json);
+        assert!(matches!(cli.command, Some(Commands::Prompt)));
     }
 
     #[test]

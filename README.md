@@ -164,6 +164,21 @@ Remove a procedural rule by ID.
 sm rules rm stale-rule
 ```
 
+### `sm prompt`
+
+Display the agent integration prompt — a ready-to-paste block for CLAUDE.md or system prompts that teaches an agent how to use slashmem.
+
+```bash
+sm prompt           # print the prompt as plain text
+sm prompt --json    # structured JSON with a "prompt" field
+```
+
+**Output fields** (JSON):
+
+| Field | Description |
+|-------|-------------|
+| `prompt` | The full agent integration prompt text |
+
 ## Global flags
 
 | Flag | Description |

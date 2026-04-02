@@ -47,7 +47,7 @@ impl ErrorOutput {
                 message: "no subcommand provided".to_string(),
                 suggestions: vec![
                     "Provide a subcommand: sm <command>".to_string(),
-                    "Available commands: context, ingest, distill, status, rules".to_string(),
+                    "Available commands: context, ingest, distill, status, rules, prompt".to_string(),
                     "Check the command syntax with: sm --help".to_string(),
                 ],
                 exit_code: crate::exit_codes::INVALID_INPUT,
@@ -137,6 +137,7 @@ impl HelpOutput {
                 HelpCommand { name: "distill".into(), description: "Run confidence decay, transitions, and pruning".into() },
                 HelpCommand { name: "status".into(), description: "Show database health and record counts".into() },
                 HelpCommand { name: "rules".into(), description: "Manage procedural rules".into() },
+                HelpCommand { name: "prompt".into(), description: "Display agent integration prompt".into() },
             ],
             exit_codes: vec![
                 HelpExitCode { code: 0, meaning: "success".into() },
@@ -419,6 +420,89 @@ impl StatusOutput {
             self.counts.procedural,
             self.schema_version,
         )
+    }
+}
+
+/// The agent integration prompt text, suitable for inclusion in CLAUDE.md or
+/// system prompts.
+pub const AGENT_PROMPT: &str = r#"# Memory — slashmem
+
+You have access to `sm`, a local memory store. Use it to persist and retrieve procedural knowledge across sessions.
+
+## Before starting a task
+
+Query for relevant context:
+```bash
+sm context "<brief description of the task>"
+```
+Review the returned `relevant_rules` (proven best practices) and `anti_patterns` (known pitfalls) before proceeding. Adjust your approach accordingly.
+
+## After completing a task
+
+Record what happened and reinforce/penalize rules:
+```bash
+sm ingest --task "<task-id>" --body "<what happened and why>" --agent "<your-agent-id>" \
+  [--success <rule-id>...] [--harm <rule-id>...]
+```
+- Use `--success <rule-id>` for each rule that contributed to a good outcome
+- Use `--harm <rule-id>` for each rule that led to a bad outcome or was proven wrong
+
+## When you discover a reusable lesson
+
+Add it as a procedural rule:
+```bash
+sm rules add "<rule-id>" "<rule text>" --source "<where you learned this>"
+```
+Choose a short, descriptive kebab-case ID (e.g. `always-run-migrations`, `no-force-push`).
+
+## Periodic maintenance
+
+Run distill to decay stale rules and prune weak ones:
+```bash
+sm distill
+```
+
+## Checking status
+
+```bash
+sm status
+```
+
+## Managing rules
+
+```bash
+sm rules list                    # list all rules
+sm rules list --query "deploy"   # search rules
+sm rules show <rule-id>          # inspect a rule
+sm rules rm <rule-id>            # remove a rule
+```
+
+## Output format
+
+All commands output JSON when piped (or with `--json`). Parse output with `jq` or your JSON library. Errors follow this envelope:
+```json
+{"error": {"code": "...", "message": "...", "suggestions": [...], "exit_code": N}}
+```
+
+## Exit codes
+
+0 = success, 1 = not found, 2 = invalid input, 3 = db error, 4 = I/O error, 5 = parse error."#;
+
+/// JSON output for the `prompt` command.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct PromptOutput {
+    pub prompt: String,
+}
+
+impl PromptOutput {
+    pub fn build() -> Self {
+        Self {
+            prompt: AGENT_PROMPT.to_string(),
+        }
+    }
+
+    pub fn to_human(&self) -> String {
+        self.prompt.clone()
     }
 }
 
@@ -1005,7 +1089,7 @@ mod tests {
     fn help_output_build_has_all_commands() {
         let help = HelpOutput::build();
         let names: Vec<&str> = help.commands.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, vec!["context", "ingest", "distill", "status", "rules"]);
+        assert_eq!(names, vec!["context", "ingest", "distill", "status", "rules", "prompt"]);
     }
 
     #[test]
@@ -1023,7 +1107,7 @@ mod tests {
         let help = HelpOutput::build();
         let json = serde_json::to_value(&help).unwrap();
         assert!(json["commands"].is_array());
-        assert_eq!(json["commands"].as_array().unwrap().len(), 5);
+        assert_eq!(json["commands"].as_array().unwrap().len(), 6);
         assert_eq!(json["commands"][0]["name"], "context");
         assert!(json["exit_codes"].is_array());
         assert!(json["version"].is_string());

@@ -84,6 +84,36 @@ fn pipe_rules_list_outputs_valid_json() {
 }
 
 #[test]
+fn pipe_prompt_outputs_valid_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["prompt"]);
+    let json = parse_success(&output);
+    assert!(json.is_object());
+    assert!(json.get("prompt").is_some());
+    let prompt = json["prompt"].as_str().unwrap();
+    assert!(prompt.contains("# Memory — slashmem"));
+    assert!(prompt.contains("sm context"));
+    assert!(prompt.contains("sm ingest"));
+    assert!(prompt.contains("sm rules"));
+}
+
+#[test]
+fn pipe_prompt_with_json_flag() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["--json", "prompt"]);
+    let json = parse_success(&output);
+    assert!(json.get("prompt").is_some());
+}
+
+#[test]
+fn pipe_prompt_quiet_suppresses_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["--quiet", "prompt"]);
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
 fn pipe_no_subcommand_outputs_error_envelope() {
     // In non-TTY (robot mode), no subcommand should produce a JSON error envelope
     let output = sm_bin().output().expect("failed to run sm");
@@ -244,6 +274,7 @@ fn exit_code_success_is_0_for_all_commands() {
         vec!["status"],
         vec!["rules", "list"],
         vec!["rules", "add", "test-r", "A rule"],
+        vec!["prompt"],
     ];
 
     for args in &commands {
@@ -498,6 +529,18 @@ fn contract_rules_rm_output_fields() {
 }
 
 #[test]
+fn contract_prompt_output_fields() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["prompt"]);
+    let json = parse_success(&output);
+    let obj = json.as_object().unwrap();
+
+    assert!(obj.contains_key("prompt"), "missing prompt");
+    assert_eq!(obj.len(), 1, "prompt output should have only 'prompt' key");
+    assert!(json["prompt"].is_string());
+}
+
+#[test]
 fn contract_error_output_fields() {
     let tmp = tempfile::tempdir().unwrap();
     run_sm(&tmp, &["context", "init"]);
@@ -575,6 +618,7 @@ fn multiple_commands_produce_consistent_json() {
         vec!["rules", "add", "r1", "A rule"],
         vec!["rules", "show", "r1"],
         vec!["rules", "rm", "r1"],
+        vec!["prompt"],
     ];
 
     for args in &runs {

@@ -41,6 +41,7 @@ fn main() {
         Commands::Distill => cmd_distill(&fmt),
         Commands::Status => cmd_status(&fmt),
         Commands::Rules(args) => cmd_rules(args, &fmt),
+        Commands::Prompt => cmd_prompt(&fmt),
     };
 
     if let Err(e) = result {
@@ -279,6 +280,18 @@ fn build_status(conn: &rusqlite::Connection) -> error::Result<output::StatusOutp
         },
         schema_version: SCHEMA_VERSION,
     })
+}
+
+fn cmd_prompt(fmt: &format::FormatContext) -> error::Result<()> {
+    let out = output::PromptOutput::build();
+    if !fmt.is_quiet() {
+        if fmt.use_json() {
+            println!("{}", serde_json::to_string(&out)?);
+        } else {
+            println!("{}", out.to_human());
+        }
+    }
+    Ok(())
 }
 
 // --- rules subcommand ---
