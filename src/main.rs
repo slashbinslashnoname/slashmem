@@ -75,11 +75,21 @@ fn build_context_with(
 }
 
 fn cmd_ingest(args: cli::IngestArgs) -> error::Result<()> {
-    let conn = db::init::open_db()?;
-    schema::ensure_schema(&conn)?;
-    let out = run_ingest(&conn, &args)?;
+    let out = match try_ingest(&args) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("sm ingest: {e}");
+            output::IngestOutput::default()
+        }
+    };
     println!("{}", serde_json::to_string(&out)?);
     Ok(())
+}
+
+fn try_ingest(args: &cli::IngestArgs) -> error::Result<output::IngestOutput> {
+    let conn = db::init::open_db()?;
+    schema::ensure_schema(&conn)?;
+    run_ingest(&conn, args)
 }
 
 fn run_ingest(
@@ -121,11 +131,21 @@ fn run_ingest(
 }
 
 fn cmd_distill() -> error::Result<()> {
-    let conn = db::init::open_db()?;
-    schema::ensure_schema(&conn)?;
-    let out = run_distill(&conn, chrono::Utc::now())?;
+    let out = match try_distill() {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("sm distill: {e}");
+            output::DistillOutput::default()
+        }
+    };
     println!("{}", serde_json::to_string(&out)?);
     Ok(())
+}
+
+fn try_distill() -> error::Result<output::DistillOutput> {
+    let conn = db::init::open_db()?;
+    schema::ensure_schema(&conn)?;
+    run_distill(&conn, chrono::Utc::now())
 }
 
 fn run_distill(
@@ -565,5 +585,90 @@ mod tests {
         assert!(out.relevant_rules.is_empty());
         assert!(out.anti_patterns.is_empty());
         assert!(out.history_snippets.is_empty());
+    }
+
+    // --- graceful degradation tests ---
+
+    /// A connection with no schema simulates a corrupted/empty DB.
+    fn broken_conn() -> Connection {
+        Connection::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn context_degrades_on_missing_schema() {
+        let conn = broken_conn();
+        let result = build_context_with(&conn, "anything");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn ingest_degrades_on_missing_schema() {
+        let conn = broken_conn();
+        let args = cli::IngestArgs {
+            task: "T-1".into(),
+            body: "data".into(),
+            agent: "a".into(),
+            success: vec![],
+            harm: vec![],
+        };
+        let result = run_ingest(&conn, &args);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn distill_degrades_on_missing_schema() {
+        let conn = broken_conn();
+        let result = run_distill(&conn, Utc::now());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cmd_context_returns_ok_on_db_error() {
+        // Point SLASHMEM_DIR to a path inside a file (not a directory) to force
+        // open_db to fail. cmd_context should still return Ok with default JSON.
+        // We can't mutate the env safely across threads, so test the inner
+        // try-catch pattern directly by calling build_context with a broken conn.
+        let conn = broken_conn();
+        let out = match build_context_with(&conn, "test") {
+            Ok(ctx) => ctx,
+            Err(_) => output::ContextOutput::default(),
+        };
+        assert_eq!(out, output::ContextOutput::default());
+    }
+
+    #[test]
+    fn cmd_ingest_degrades_to_default_on_error() {
+        let conn = broken_conn();
+        let args = cli::IngestArgs {
+            task: "T-1".into(),
+            body: "data".into(),
+            agent: "a".into(),
+            success: vec![],
+            harm: vec![],
+        };
+        let out = match run_ingest(&conn, &args) {
+            Ok(o) => o,
+            Err(_) => output::IngestOutput::default(),
+        };
+        assert_eq!(out, output::IngestOutput::default());
+        // Verify the default serializes to valid JSON
+        let json = serde_json::to_string(&out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["episodic_id"].is_null());
+    }
+
+    #[test]
+    fn cmd_distill_degrades_to_default_on_error() {
+        let conn = broken_conn();
+        let out = match run_distill(&conn, Utc::now()) {
+            Ok(o) => o,
+            Err(_) => output::DistillOutput::default(),
+        };
+        assert_eq!(out, output::DistillOutput::default());
+        let json = serde_json::to_string(&out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["decayed"], 0);
+        assert_eq!(parsed["pruned"], 0);
+        assert_eq!(parsed["transitioned"], 0);
     }
 }

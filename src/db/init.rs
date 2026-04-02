@@ -23,10 +23,10 @@ pub fn db_path() -> PathBuf {
 }
 
 /// Ensures the base directory exists, then opens (or creates) the SQLite database.
-pub fn open_db() -> rusqlite::Result<rusqlite::Connection> {
+pub fn open_db() -> crate::error::Result<rusqlite::Connection> {
     let dir = base_dir();
-    std::fs::create_dir_all(&dir).expect("failed to create slashmem directory");
-    rusqlite::Connection::open(db_path())
+    std::fs::create_dir_all(&dir)?;
+    Ok(rusqlite::Connection::open(db_path())?)
 }
 
 #[cfg(test)]
