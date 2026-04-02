@@ -3,6 +3,7 @@ pub mod confidence;
 pub mod db;
 pub mod error;
 pub mod exit_codes;
+pub mod format;
 pub mod output;
 pub mod schema;
 
@@ -13,11 +14,12 @@ use cli::{Cli, Commands};
 
 fn main() {
     let cli = Cli::parse();
+    let fmt = format::FormatContext::detect(cli.json, cli.quiet);
 
     let result = match cli.command {
-        Commands::Context(args) => cmd_context(args),
-        Commands::Ingest(args) => cmd_ingest(args),
-        Commands::Distill => cmd_distill(),
+        Commands::Context(args) => cmd_context(args, &fmt),
+        Commands::Ingest(args) => cmd_ingest(args, &fmt),
+        Commands::Distill => cmd_distill(&fmt),
     };
 
     if let Err(e) = result {
@@ -39,7 +41,7 @@ fn warn_degraded() {
 const PROCEDURAL_SEARCH_LIMIT: u32 = 20;
 const WORKING_SEARCH_LIMIT: u32 = 10;
 
-fn cmd_context(args: cli::ContextArgs) -> error::Result<()> {
+fn cmd_context(args: cli::ContextArgs, fmt: &format::FormatContext) -> error::Result<()> {
     let out = match build_context(&args.description) {
         Ok(ctx) => ctx,
         Err(_) => {
@@ -47,7 +49,9 @@ fn cmd_context(args: cli::ContextArgs) -> error::Result<()> {
             output::ContextOutput::default()
         }
     };
-    println!("{}", serde_json::to_string(&out)?);
+    if !fmt.is_quiet() {
+        println!("{}", serde_json::to_string(&out)?);
+    }
     Ok(())
 }
 
@@ -86,7 +90,7 @@ fn build_context_with(
     })
 }
 
-fn cmd_ingest(args: cli::IngestArgs) -> error::Result<()> {
+fn cmd_ingest(args: cli::IngestArgs, fmt: &format::FormatContext) -> error::Result<()> {
     let out = match try_ingest(&args) {
         Ok(o) => o,
         Err(_) => {
@@ -94,7 +98,9 @@ fn cmd_ingest(args: cli::IngestArgs) -> error::Result<()> {
             output::IngestOutput::default()
         }
     };
-    println!("{}", serde_json::to_string(&out)?);
+    if !fmt.is_quiet() {
+        println!("{}", serde_json::to_string(&out)?);
+    }
     Ok(())
 }
 
@@ -142,7 +148,7 @@ fn run_ingest(
     })
 }
 
-fn cmd_distill() -> error::Result<()> {
+fn cmd_distill(fmt: &format::FormatContext) -> error::Result<()> {
     let out = match try_distill() {
         Ok(o) => o,
         Err(_) => {
@@ -150,7 +156,9 @@ fn cmd_distill() -> error::Result<()> {
             output::DistillOutput::default()
         }
     };
-    println!("{}", serde_json::to_string(&out)?);
+    if !fmt.is_quiet() {
+        println!("{}", serde_json::to_string(&out)?);
+    }
     Ok(())
 }
 
@@ -223,9 +231,9 @@ mod tests {
     fn cmd_context_stub_returns_ok() {
         let args = cli::ContextArgs {
             description: "test".into(),
-            json: false,
         };
-        assert!(cmd_context(args).is_ok());
+        let fmt = format::FormatContext::new(false, true, false);
+        assert!(cmd_context(args, &fmt).is_ok());
     }
 
     #[test]

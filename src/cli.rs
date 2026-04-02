@@ -4,6 +4,14 @@ use clap::{Parser, Subcommand};
 #[derive(Parser, Debug)]
 #[command(name = "sm", version, about)]
 pub struct Cli {
+    /// Force JSON output (default when stdout is not a TTY)
+    #[arg(long, global = true)]
+    pub json: bool,
+
+    /// Suppress normal stdout output
+    #[arg(long, global = true)]
+    pub quiet: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -23,10 +31,6 @@ pub enum Commands {
 pub struct ContextArgs {
     /// Task description to search for relevant memories
     pub description: String,
-
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
 }
 
 /// Arguments for the `ingest` subcommand.
@@ -66,24 +70,42 @@ mod tests {
     #[test]
     fn parse_context_command() {
         let cli = Cli::parse_from(["sm", "context", "fix the login bug"]);
+        assert!(!cli.json);
+        assert!(!cli.quiet);
         match cli.command {
             Commands::Context(args) => {
                 assert_eq!(args.description, "fix the login bug");
-                assert!(!args.json);
             }
             _ => panic!("expected Context command"),
         }
     }
 
     #[test]
-    fn parse_context_with_json() {
+    fn parse_global_json_flag() {
+        let cli = Cli::parse_from(["sm", "--json", "context", "fix the login bug"]);
+        assert!(cli.json);
+        assert!(!cli.quiet);
+    }
+
+    #[test]
+    fn parse_global_quiet_flag() {
+        let cli = Cli::parse_from(["sm", "--quiet", "context", "fix the login bug"]);
+        assert!(!cli.json);
+        assert!(cli.quiet);
+    }
+
+    #[test]
+    fn parse_json_flag_after_subcommand() {
+        // global flags work after subcommand too
         let cli = Cli::parse_from(["sm", "context", "--json", "fix the login bug"]);
-        match cli.command {
-            Commands::Context(args) => {
-                assert!(args.json);
-            }
-            _ => panic!("expected Context command"),
-        }
+        assert!(cli.json);
+    }
+
+    #[test]
+    fn parse_both_json_and_quiet() {
+        let cli = Cli::parse_from(["sm", "--json", "--quiet", "distill"]);
+        assert!(cli.json);
+        assert!(cli.quiet);
     }
 
     #[test]
