@@ -500,32 +500,22 @@ fn rules_list_with_query_filters() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn no_subcommand_prints_short_help_and_exits_zero() {
-    // When stdout is not a TTY (as in test), help is emitted as JSON to stdout.
+fn no_subcommand_in_robot_mode_emits_error_envelope() {
+    // When stdout is not a TTY (as in test), no subcommand emits a JSON error
+    // envelope and exits non-zero.
     let output = sm_bin().output().expect("failed to run sm");
     assert!(
-        output.status.success(),
-        "sm with no args should exit 0, got {}",
+        !output.status.success(),
+        "sm with no args in robot mode should exit non-zero, got {}",
         output.status
     );
+    assert_eq!(output.status.code().unwrap(), 2);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value =
-        serde_json::from_str(&stdout).expect("help output should be valid JSON");
-    assert!(
-        json["commands"].is_array(),
-        "help JSON should have commands array"
-    );
-    let commands = json["commands"].as_array().unwrap();
-    assert!(
-        commands.len() >= 5,
-        "help should list at least 5 commands"
-    );
-    let names: Vec<&str> = commands.iter().map(|c| c["name"].as_str().unwrap()).collect();
-    assert!(names.contains(&"context"), "should contain context");
-    assert!(names.contains(&"status"), "should contain status");
-    assert!(names.contains(&"rules"), "should contain rules");
-    assert!(json["exit_codes"].is_array(), "help JSON should have exit_codes");
-    assert!(json["version"].is_string(), "help JSON should have version");
+        serde_json::from_str(&stdout).expect("output should be valid JSON");
+    assert!(json.get("error").is_some(), "should have error envelope");
+    assert_eq!(json["error"]["code"], "INVALID_INPUT");
+    assert!(json["error"]["message"].as_str().unwrap().contains("no subcommand"));
 }
 
 // ---------------------------------------------------------------------------

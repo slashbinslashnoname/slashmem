@@ -84,13 +84,15 @@ fn pipe_rules_list_outputs_valid_json() {
 }
 
 #[test]
-fn pipe_help_outputs_valid_json() {
-    // No SLASHMEM_DIR needed — just no subcommand
+fn pipe_no_subcommand_outputs_error_envelope() {
+    // In non-TTY (robot mode), no subcommand should produce a JSON error envelope
     let output = sm_bin().output().expect("failed to run sm");
-    assert!(output.status.success());
+    assert!(!output.status.success());
+    assert_eq!(output.status.code().unwrap(), 2);
     let json = parse_json(&output);
-    assert!(json.is_object());
-    assert!(json.get("commands").is_some());
+    assert!(json.get("error").is_some());
+    assert_eq!(json["error"]["code"], "INVALID_INPUT");
+    assert!(json["error"]["message"].as_str().unwrap().contains("no subcommand"));
 }
 
 #[test]
@@ -133,15 +135,17 @@ fn json_flag_forces_json_on_status() {
 }
 
 #[test]
-fn json_flag_forces_json_on_help() {
+fn json_flag_no_subcommand_produces_error_envelope() {
     let output = sm_bin()
         .arg("--json")
         .output()
         .expect("failed to run sm");
-    assert!(output.status.success());
+    assert!(!output.status.success());
+    assert_eq!(output.status.code().unwrap(), 2);
     let json = parse_json(&output);
-    assert!(json.get("commands").is_some());
-    assert!(json.get("version").is_some());
+    assert!(json.get("error").is_some());
+    assert_eq!(json["error"]["code"], "INVALID_INPUT");
+    assert!(json["error"]["message"].as_str().unwrap().contains("no subcommand"));
 }
 
 #[test]
@@ -285,83 +289,37 @@ fn exit_code_nonzero_for_rules_show_missing() {
 // ===========================================================================
 
 #[test]
-fn help_json_is_compact_and_complete() {
+fn no_subcommand_error_envelope_has_suggestions() {
+    // In non-TTY, `sm` with no subcommand emits an error envelope with helpful suggestions
     let output = sm_bin().output().expect("failed to run sm");
-    let json = parse_success(&output);
-
-    // Must have all expected fields
-    assert!(json["version"].is_string());
-    assert!(json["usage"].is_string());
-    assert!(json["commands"].is_array());
-    assert!(json["exit_codes"].is_array());
-
-    // Commands list should include all 5 subcommands
-    let commands = json["commands"].as_array().unwrap();
-    assert_eq!(commands.len(), 5, "should list exactly 5 commands");
-
-    let names: Vec<&str> = commands
-        .iter()
-        .map(|c| c["name"].as_str().unwrap())
-        .collect();
-    for expected in &["context", "ingest", "distill", "status", "rules"] {
-        assert!(
-            names.contains(expected),
-            "help should list {expected} command"
-        );
-    }
-
-    // Each command entry should have name + description
-    for cmd in commands {
-        assert!(cmd["name"].is_string());
-        assert!(cmd["description"].is_string());
-        assert!(!cmd["description"].as_str().unwrap().is_empty());
-    }
+    assert!(!output.status.success());
+    let json = parse_json(&output);
+    let err = &json["error"];
+    let suggestions = err["suggestions"].as_array().unwrap();
+    assert!(!suggestions.is_empty(), "error should include suggestions");
+    // Suggestions should mention available commands
+    let all_suggestions: String = suggestions.iter().map(|s| s.as_str().unwrap()).collect::<Vec<_>>().join(" ");
+    assert!(all_suggestions.contains("context"), "suggestions should mention available commands");
 }
 
 #[test]
-fn help_exit_codes_list_all_codes() {
-    let output = sm_bin().output().expect("failed to run sm");
-    let json = parse_success(&output);
-
-    let exit_codes = json["exit_codes"].as_array().unwrap();
-    // Should list 7 exit codes: 0, 1, 2, 3, 4, 5, 127
-    assert_eq!(exit_codes.len(), 7, "should list 7 exit codes");
-
-    let codes: Vec<i64> = exit_codes
-        .iter()
-        .map(|e| e["code"].as_i64().unwrap())
-        .collect();
-    for expected in &[0, 1, 2, 3, 4, 5, 127] {
-        assert!(
-            codes.contains(expected),
-            "exit codes should include {expected}"
-        );
-    }
-
-    // Each exit code entry should have meaning
-    for ec in exit_codes {
-        assert!(ec["meaning"].is_string());
-        assert!(!ec["meaning"].as_str().unwrap().is_empty());
-    }
-}
-
-#[test]
-fn help_json_token_count_is_compact() {
-    // The JSON help output should be reasonably compact for agent consumption.
-    // We approximate token count as whitespace-separated words.
+fn no_subcommand_error_envelope_is_compact() {
+    // The error envelope for no-subcommand should be a single compact JSON line
     let output = sm_bin().output().expect("failed to run sm");
     let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // JSON serialization should be a single line (compact, not pretty-printed)
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 1, "JSON help should be a single line");
+    assert_eq!(lines.len(), 1, "error JSON should be a single line");
+}
 
-    // Rough token estimate: JSON string length should be reasonable
-    // A compact help blob for 5 commands + 7 exit codes should be under 600 bytes
-    assert!(
-        stdout.len() < 1000,
-        "help JSON should be compact (<1000 bytes), got {} bytes",
-        stdout.len()
+#[test]
+fn no_subcommand_error_exit_code_consistency() {
+    let output = sm_bin().output().expect("failed to run sm");
+    let process_exit = output.status.code().unwrap();
+    let json = parse_json(&output);
+    let envelope_exit = json["error"]["exit_code"].as_i64().unwrap() as i32;
+    assert_eq!(
+        process_exit, envelope_exit,
+        "process exit code ({process_exit}) should match envelope exit_code ({envelope_exit})"
     );
 }
 
@@ -560,25 +518,22 @@ fn contract_error_output_fields() {
 }
 
 #[test]
-fn contract_help_output_fields() {
+fn contract_no_subcommand_error_envelope_fields() {
+    // In non-TTY, bare `sm` produces an error envelope (not help JSON)
     let output = sm_bin().output().expect("failed to run sm");
-    let json = parse_success(&output);
+    assert!(!output.status.success());
+    let json = parse_json(&output);
     let obj = json.as_object().unwrap();
 
-    assert!(obj.contains_key("version"), "missing version");
-    assert!(obj.contains_key("usage"), "missing usage");
-    assert!(obj.contains_key("commands"), "missing commands");
-    assert!(obj.contains_key("exit_codes"), "missing exit_codes");
+    assert!(obj.contains_key("error"), "missing error envelope");
+    assert_eq!(obj.len(), 1, "error envelope should have only 'error' key");
 
-    // Commands entries
-    let cmd = &json["commands"][0];
-    assert!(cmd["name"].is_string());
-    assert!(cmd["description"].is_string());
-
-    // Exit code entries
-    let ec = &json["exit_codes"][0];
-    assert!(ec["code"].is_number());
-    assert!(ec["meaning"].is_string());
+    let err = json["error"].as_object().unwrap();
+    assert!(err.contains_key("code"));
+    assert!(err.contains_key("message"));
+    assert!(err.contains_key("suggestions"));
+    assert!(err.contains_key("exit_code"));
+    assert_eq!(err["code"], "INVALID_INPUT");
 }
 
 // ===========================================================================

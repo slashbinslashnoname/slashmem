@@ -23,6 +23,13 @@ fn main() {
     let command = match cli.command {
         Some(cmd) => cmd,
         None => {
+            if fmt.use_json() {
+                // Robot mode: emit a structured error envelope so callers can
+                // distinguish "no subcommand" from a successful empty result.
+                let err_out = output::ErrorOutput::no_subcommand();
+                err_out.render(&fmt);
+                std::process::exit(exit_codes::INVALID_INPUT);
+            }
             display_short_help(&fmt);
             std::process::exit(0);
         }

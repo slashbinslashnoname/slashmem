@@ -39,6 +39,22 @@ impl ErrorOutput {
         }
     }
 
+    /// Build an ErrorOutput for the "no subcommand given" case in robot mode.
+    pub fn no_subcommand() -> Self {
+        Self {
+            error: ErrorDetail {
+                code: "INVALID_INPUT".to_string(),
+                message: "no subcommand provided".to_string(),
+                suggestions: vec![
+                    "Provide a subcommand: sm <command>".to_string(),
+                    "Available commands: context, ingest, distill, status, rules".to_string(),
+                    "Check the command syntax with: sm --help".to_string(),
+                ],
+                exit_code: crate::exit_codes::INVALID_INPUT,
+            },
+        }
+    }
+
     /// Build an ErrorOutput from a clap parse error.
     ///
     /// Extracts the rendered message from clap and wraps it in the same
@@ -477,6 +493,15 @@ mod tests {
     }
 
     // --- ErrorOutput / ErrorDetail tests ---
+
+    #[test]
+    fn error_output_no_subcommand() {
+        let out = ErrorOutput::no_subcommand();
+        assert_eq!(out.error.code, "INVALID_INPUT");
+        assert!(out.error.message.contains("no subcommand"));
+        assert_eq!(out.error.exit_code, 2);
+        assert!(!out.error.suggestions.is_empty());
+    }
 
     #[test]
     fn error_output_from_not_found() {
