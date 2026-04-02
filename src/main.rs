@@ -53,7 +53,11 @@ fn cmd_context(args: cli::ContextArgs, fmt: &format::FormatContext) -> error::Re
         }
     };
     if !fmt.is_quiet() {
-        println!("{}", serde_json::to_string(&out)?);
+        if fmt.use_json() {
+            println!("{}", serde_json::to_string(&out)?);
+        } else {
+            println!("{}", out.to_human());
+        }
     }
     Ok(())
 }
@@ -102,7 +106,11 @@ fn cmd_ingest(args: cli::IngestArgs, fmt: &format::FormatContext) -> error::Resu
         }
     };
     if !fmt.is_quiet() {
-        println!("{}", serde_json::to_string(&out)?);
+        if fmt.use_json() {
+            println!("{}", serde_json::to_string(&out)?);
+        } else {
+            println!("{}", out.to_human());
+        }
     }
     Ok(())
 }
@@ -160,7 +168,11 @@ fn cmd_distill(fmt: &format::FormatContext) -> error::Result<()> {
         }
     };
     if !fmt.is_quiet() {
-        println!("{}", serde_json::to_string(&out)?);
+        if fmt.use_json() {
+            println!("{}", serde_json::to_string(&out)?);
+        } else {
+            println!("{}", out.to_human());
+        }
     }
     Ok(())
 }

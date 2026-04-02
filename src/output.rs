@@ -66,6 +66,43 @@ pub struct ContextOutput {
     pub history_snippets: Vec<String>,
 }
 
+impl ContextOutput {
+    /// Render as human-readable text with section headers and counts.
+    pub fn to_human(&self) -> String {
+        let mut sections: Vec<String> = Vec::new();
+
+        if !self.relevant_rules.is_empty() {
+            let mut s = format!("rules ({}):", self.relevant_rules.len());
+            for r in &self.relevant_rules {
+                s.push_str(&format!("\n  - {r}"));
+            }
+            sections.push(s);
+        }
+
+        if !self.anti_patterns.is_empty() {
+            let mut s = format!("anti-patterns ({}):", self.anti_patterns.len());
+            for a in &self.anti_patterns {
+                s.push_str(&format!("\n  - {a}"));
+            }
+            sections.push(s);
+        }
+
+        if !self.history_snippets.is_empty() {
+            let mut s = format!("history ({}):", self.history_snippets.len());
+            for h in &self.history_snippets {
+                s.push_str(&format!("\n  - {h}"));
+            }
+            sections.push(s);
+        }
+
+        if sections.is_empty() {
+            return "no context".to_string();
+        }
+
+        sections.join("\n\n")
+    }
+}
+
 /// JSON output for the `ingest` command.
 #[derive(Debug, Default, Serialize, PartialEq)]
 pub struct IngestOutput {
@@ -74,12 +111,53 @@ pub struct IngestOutput {
     pub validated_rules: Vec<String>,
 }
 
+impl IngestOutput {
+    /// Render as human-readable text.
+    pub fn to_human(&self) -> String {
+        let mut lines: Vec<String> = Vec::new();
+
+        if let Some(ref id) = self.episodic_id {
+            lines.push(format!("ingested episode {id}"));
+        } else {
+            lines.push("ingested (no episode)".to_string());
+        }
+
+        if !self.proposed_rules.is_empty() {
+            lines.push(format!(
+                "proposed rules ({}): {}",
+                self.proposed_rules.len(),
+                self.proposed_rules.join(", ")
+            ));
+        }
+
+        if !self.validated_rules.is_empty() {
+            lines.push(format!(
+                "validated rules ({}): {}",
+                self.validated_rules.len(),
+                self.validated_rules.join(", ")
+            ));
+        }
+
+        lines.join("\n")
+    }
+}
+
 /// JSON output for the `distill` command.
 #[derive(Debug, Default, Serialize, PartialEq)]
 pub struct DistillOutput {
     pub decayed: u64,
     pub pruned: u64,
     pub transitioned: u64,
+}
+
+impl DistillOutput {
+    /// Render as human-readable text.
+    pub fn to_human(&self) -> String {
+        format!(
+            "distill: {} decayed, {} pruned, {} transitioned",
+            self.decayed, self.pruned, self.transitioned
+        )
+    }
 }
 
 /// Record counts per memory table.
@@ -678,6 +756,117 @@ mod tests {
             deleted: false,
         };
         assert_eq!(out.to_human(), "rule r1 not found");
+    }
+
+    // --- context to_human tests ---
+
+    #[test]
+    fn context_to_human_empty() {
+        let out = ContextOutput::default();
+        assert_eq!(out.to_human(), "no context");
+    }
+
+    #[test]
+    fn context_to_human_all_sections() {
+        let out = ContextOutput {
+            relevant_rules: vec![
+                "Prefer explicit transaction boundaries".into(),
+                "Always close DB connection".into(),
+            ],
+            anti_patterns: vec!["Do not run VACUUM inside a transaction".into()],
+            history_snippets: vec!["[2026-03-28] Migrated schema".into()],
+        };
+        let human = out.to_human();
+        assert!(human.contains("rules (2):"));
+        assert!(human.contains("  - Prefer explicit transaction boundaries"));
+        assert!(human.contains("  - Always close DB connection"));
+        assert!(human.contains("anti-patterns (1):"));
+        assert!(human.contains("  - Do not run VACUUM inside a transaction"));
+        assert!(human.contains("history (1):"));
+        assert!(human.contains("  - [2026-03-28] Migrated schema"));
+    }
+
+    #[test]
+    fn context_to_human_only_rules() {
+        let out = ContextOutput {
+            relevant_rules: vec!["Rule one".into()],
+            anti_patterns: vec![],
+            history_snippets: vec![],
+        };
+        let human = out.to_human();
+        assert!(human.contains("rules (1):"));
+        assert!(!human.contains("anti-patterns"));
+        assert!(!human.contains("history"));
+    }
+
+    #[test]
+    fn context_to_human_sections_separated_by_blank_line() {
+        let out = ContextOutput {
+            relevant_rules: vec!["r1".into()],
+            anti_patterns: vec!["a1".into()],
+            history_snippets: vec![],
+        };
+        let human = out.to_human();
+        assert!(human.contains("\n\n"));
+    }
+
+    // --- ingest to_human tests ---
+
+    #[test]
+    fn ingest_to_human_with_id() {
+        let out = IngestOutput {
+            episodic_id: Some("42".into()),
+            proposed_rules: vec![],
+            validated_rules: vec![],
+        };
+        assert_eq!(out.to_human(), "ingested episode 42");
+    }
+
+    #[test]
+    fn ingest_to_human_no_id() {
+        let out = IngestOutput::default();
+        assert_eq!(out.to_human(), "ingested (no episode)");
+    }
+
+    #[test]
+    fn ingest_to_human_with_validated() {
+        let out = IngestOutput {
+            episodic_id: Some("7".into()),
+            proposed_rules: vec![],
+            validated_rules: vec!["r1".into(), "r2".into()],
+        };
+        let human = out.to_human();
+        assert!(human.contains("ingested episode 7"));
+        assert!(human.contains("validated rules (2): r1, r2"));
+    }
+
+    #[test]
+    fn ingest_to_human_with_proposed() {
+        let out = IngestOutput {
+            episodic_id: Some("1".into()),
+            proposed_rules: vec!["p1".into()],
+            validated_rules: vec![],
+        };
+        let human = out.to_human();
+        assert!(human.contains("proposed rules (1): p1"));
+    }
+
+    // --- distill to_human tests ---
+
+    #[test]
+    fn distill_to_human_zeros() {
+        let out = DistillOutput::default();
+        assert_eq!(out.to_human(), "distill: 0 decayed, 0 pruned, 0 transitioned");
+    }
+
+    #[test]
+    fn distill_to_human_with_values() {
+        let out = DistillOutput {
+            decayed: 5,
+            pruned: 3,
+            transitioned: 1,
+        };
+        assert_eq!(out.to_human(), "distill: 5 decayed, 3 pruned, 1 transitioned");
     }
 
     #[test]
