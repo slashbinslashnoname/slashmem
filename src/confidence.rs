@@ -3,6 +3,22 @@ use chrono::{DateTime, Utc};
 const HALF_LIFE_DAYS: f64 = 90.0;
 const HARM_MULTIPLIER: f64 = 4.0;
 
+/// A procedure with confidence above this threshold is considered proven.
+pub const PROVEN_THRESHOLD: f64 = 0.8;
+
+/// A procedure with this many or more harmful outcomes is an anti-pattern.
+pub const ANTI_PATTERN_HARM_MIN: u32 = 3;
+
+/// Returns `true` when confidence exceeds the proven threshold.
+pub fn is_proven(score: f64) -> bool {
+    score > PROVEN_THRESHOLD
+}
+
+/// Returns `true` when the failure count indicates an anti-pattern.
+pub fn is_anti_pattern(failure_count: u32) -> bool {
+    failure_count >= ANTI_PATTERN_HARM_MIN
+}
+
 /// Compute confidence score using exponential decay.
 ///
 /// Formula: C = (S - 4H) * 0.5^(dt / 90)
@@ -94,5 +110,30 @@ mod tests {
         let t0 = utc(2026, 6, 1);
         let now = utc(2026, 1, 1);
         assert!((confidence(5, 0, t0, now) - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn is_proven_above_threshold() {
+        assert!(is_proven(0.81));
+        assert!(is_proven(5.0));
+    }
+
+    #[test]
+    fn is_proven_at_and_below_threshold() {
+        assert!(!is_proven(0.8));
+        assert!(!is_proven(0.0));
+        assert!(!is_proven(-1.0));
+    }
+
+    #[test]
+    fn is_anti_pattern_at_and_above_threshold() {
+        assert!(is_anti_pattern(3));
+        assert!(is_anti_pattern(100));
+    }
+
+    #[test]
+    fn is_anti_pattern_below_threshold() {
+        assert!(!is_anti_pattern(0));
+        assert!(!is_anti_pattern(2));
     }
 }
