@@ -45,14 +45,14 @@ pub fn recent(conn: &Connection, limit: u32) -> crate::error::Result<Vec<Working
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
-/// Full-text search across summary and body. Returns matching entries ranked by relevance.
+/// Full-text search across summary and body. Returns matching entries ordered by recency.
 pub fn search(conn: &Connection, query: &str, limit: u32) -> crate::error::Result<Vec<WorkingEntry>> {
     let mut stmt = conn.prepare(
         "SELECT w.id, w.summary, w.body, w.task_id, w.agent, w.created_at
          FROM working_fts f
          JOIN working w ON w.id = f.rowid
          WHERE working_fts MATCH ?1
-         ORDER BY rank
+         ORDER BY w.created_at DESC, w.id DESC
          LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![query, limit], |row| {
@@ -202,6 +202,31 @@ mod tests {
         }
         let results = search(&conn, "deploy", 3).unwrap();
         assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn search_returns_newest_first() {
+        let conn = setup();
+        // Insert entries with explicit timestamps; "old" has more keyword repetition
+        // (higher FTS5 relevance) but should still appear last due to recency ordering.
+        conn.execute(
+            "INSERT INTO working (summary, body, created_at) VALUES ('deploy deploy deploy', 'deploy deploy', '2025-01-01 00:00:00')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO working (summary, created_at) VALUES ('unrelated mid entry', '2025-06-01 00:00:00')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO working (summary, created_at) VALUES ('single deploy mention', '2025-12-01 00:00:00')",
+            [],
+        ).unwrap();
+
+        let results = search(&conn, "deploy", 10).unwrap();
+        assert_eq!(results.len(), 2);
+        // Most recent matching entry first, even though the older one is more relevant by FTS5 rank
+        assert_eq!(results[0].summary, "single deploy mention");
+        assert_eq!(results[1].summary, "deploy deploy deploy");
     }
 
     #[test]
