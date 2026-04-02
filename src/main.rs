@@ -66,14 +66,19 @@ fn display_short_help(fmt: &format::FormatContext) {
 fn handle_clap_error(e: clap::Error) -> ! {
     use clap::error::ErrorKind;
 
-    // Let display-type messages (help, version) pass through unchanged.
-    if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
-        e.exit();
-    }
-
     // Determine robot mode from raw args: look for --json flag, or non-TTY stdout.
     let json_flag = std::env::args().any(|a| a == "--json");
     let fmt = format::FormatContext::detect(json_flag, false);
+
+    // For display-type messages (help, version): in robot mode emit structured
+    // JSON; otherwise let clap print its plain-text output.
+    if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
+        if fmt.use_json() {
+            display_short_help(&fmt);
+            std::process::exit(0);
+        }
+        e.exit();
+    }
 
     let err_out = output::ErrorOutput::from_clap_error(&e);
     err_out.render(&fmt);

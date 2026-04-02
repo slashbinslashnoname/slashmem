@@ -768,6 +768,72 @@ fn clap_missing_subcommand_arg_produces_json() {
     assert_eq!(json["error"]["exit_code"], 2);
 }
 
+// ===========================================================================
+// 11. --help in robot mode produces JSON help, not plain text
+// ===========================================================================
+
+#[test]
+fn help_flag_with_json_flag_produces_json_help() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["--json", "--help"]);
+    assert!(output.status.success(), "sm --json --help should exit 0");
+
+    let json = parse_success(&output);
+    assert!(json.get("version").is_some(), "help JSON should have version");
+    assert!(json.get("commands").is_some(), "help JSON should have commands");
+    assert!(json.get("usage").is_some(), "help JSON should have usage");
+}
+
+#[test]
+fn help_flag_with_json_flag_reversed_order() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["--help", "--json"]);
+    // Even with --help before --json, clap intercepts as DisplayHelp;
+    // our handler should detect --json in raw args and emit JSON.
+    assert!(output.status.success(), "sm --help --json should exit 0");
+
+    let json = parse_success(&output);
+    assert!(json.get("version").is_some());
+    assert!(json.get("commands").is_some());
+}
+
+#[test]
+fn help_flag_on_pipe_produces_json_help() {
+    // In non-TTY (pipe), --help should produce JSON help (not plain text)
+    let output = sm_bin().arg("--help").output().expect("failed to run sm");
+    assert!(output.status.success(), "sm --help on pipe should exit 0");
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("--help on pipe should be valid JSON");
+    assert!(json.get("version").is_some());
+    assert!(json.get("commands").is_some());
+    assert!(json.get("exit_codes").is_some());
+}
+
+#[test]
+fn help_flag_json_output_is_compact_single_line() {
+    let output = sm_bin()
+        .args(["--json", "--help"])
+        .output()
+        .expect("failed to run sm");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 1, "help JSON should be a single compact line");
+}
+
+#[test]
+fn help_flag_json_stderr_is_empty() {
+    let output = sm_bin()
+        .args(["--json", "--help"])
+        .output()
+        .expect("failed to run sm");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.is_empty(),
+        "stderr should be empty for --json --help, got: {stderr}"
+    );
+}
+
 #[test]
 fn clap_error_exit_code_consistency() {
     let tmp = tempfile::tempdir().unwrap();
