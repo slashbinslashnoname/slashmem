@@ -1,0 +1,10 @@
+.slashbot/
+.slashbotrc
+.beads/
+.worktrees/
+*.__merge_tmp/
+
+
+# Added by cargo
+
+/target
