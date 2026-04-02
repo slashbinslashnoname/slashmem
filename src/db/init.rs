@@ -26,8 +26,7 @@ pub fn db_path() -> PathBuf {
 pub fn open_db() -> rusqlite::Result<rusqlite::Connection> {
     let dir = base_dir();
     std::fs::create_dir_all(&dir).expect("failed to create slashmem directory");
-    let path = dir.join(DB_FILENAME);
-    rusqlite::Connection::open(path)
+    rusqlite::Connection::open(db_path())
 }
 
 #[cfg(test)]
