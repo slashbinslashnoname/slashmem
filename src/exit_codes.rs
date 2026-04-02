@@ -6,20 +6,23 @@
 /// Command completed successfully.
 pub const SUCCESS: i32 = 0;
 
-/// Unspecified / general error.
-pub const GENERAL_ERROR: i32 = 1;
+/// Requested resource was not found.
+pub const NOT_FOUND: i32 = 1;
 
 /// Invalid arguments or usage error.
-pub const INVALID_ARGS: i32 = 2;
+pub const INVALID_INPUT: i32 = 2;
 
-/// Requested resource was not found.
-pub const NOT_FOUND: i32 = 3;
+/// Database error.
+pub const DB_ERROR: i32 = 3;
 
 /// I/O error (file system, network, etc.).
 pub const IO_ERROR: i32 = 4;
 
-/// Configuration or environment error.
-pub const CONFIG_ERROR: i32 = 5;
+/// JSON parse / serialization error.
+pub const PARSE_ERROR: i32 = 5;
+
+/// Internal / unclassified error.
+pub const INTERNAL: i32 = 127;
 
 #[cfg(test)]
 mod tests {
@@ -27,7 +30,7 @@ mod tests {
 
     #[test]
     fn codes_are_distinct() {
-        let codes = [SUCCESS, GENERAL_ERROR, INVALID_ARGS, NOT_FOUND, IO_ERROR, CONFIG_ERROR];
+        let codes = [SUCCESS, NOT_FOUND, INVALID_INPUT, DB_ERROR, IO_ERROR, PARSE_ERROR, INTERNAL];
         for (i, a) in codes.iter().enumerate() {
             for (j, b) in codes.iter().enumerate() {
                 if i != j {
@@ -39,7 +42,7 @@ mod tests {
 
     #[test]
     fn codes_are_non_negative() {
-        for code in [SUCCESS, GENERAL_ERROR, INVALID_ARGS, NOT_FOUND, IO_ERROR, CONFIG_ERROR] {
+        for code in [SUCCESS, NOT_FOUND, INVALID_INPUT, DB_ERROR, IO_ERROR, PARSE_ERROR, INTERNAL] {
             assert!(code >= 0, "exit code {code} must be non-negative");
         }
     }
@@ -47,5 +50,15 @@ mod tests {
     #[test]
     fn success_is_zero() {
         assert_eq!(SUCCESS, 0);
+    }
+
+    #[test]
+    fn not_found_is_one() {
+        assert_eq!(NOT_FOUND, 1);
+    }
+
+    #[test]
+    fn internal_is_127() {
+        assert_eq!(INTERNAL, 127);
     }
 }
