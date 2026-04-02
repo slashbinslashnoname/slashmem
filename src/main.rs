@@ -102,10 +102,10 @@ fn run_distill(
     let updated_rules = db::procedural::all(conn)?;
     let mut transitioned = 0u64;
     for rule in &updated_rules {
-        if let Some(&(was_proven, was_anti)) = before.get(&rule.id) {
-            if rule.is_proven != was_proven || rule.is_anti_pattern != was_anti {
-                transitioned += 1;
-            }
+        if let Some(&(was_proven, was_anti)) = before.get(&rule.id)
+            && (rule.is_proven != was_proven || rule.is_anti_pattern != was_anti)
+        {
+            transitioned += 1;
         }
     }
 
