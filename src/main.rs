@@ -9,14 +9,23 @@ pub mod schema;
 
 use std::io::IsTerminal;
 
+use clap::Parser;
 use cli::{Cli, Commands};
 use output::Render;
 
 fn main() {
-    let cli = Cli::parse_or_short_help();
+    let cli = Cli::parse();
     let fmt = format::FormatContext::detect(cli.json, cli.quiet);
 
-    let result = match cli.command {
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => {
+            display_short_help(&fmt);
+            std::process::exit(0);
+        }
+    };
+
+    let result = match command {
         Commands::Context(args) => cmd_context(args, &fmt),
         Commands::Ingest(args) => cmd_ingest(args, &fmt),
         Commands::Distill => cmd_distill(&fmt),
@@ -29,6 +38,12 @@ fn main() {
         err_out.render(&fmt);
         std::process::exit(e.exit_code());
     }
+}
+
+/// Display compact help output, format-aware (JSON or human-readable).
+fn display_short_help(fmt: &format::FormatContext) {
+    let help = output::HelpOutput::build();
+    help.render(fmt);
 }
 
 /// Emit a one-line warning to stderr, but only when stderr is a terminal.

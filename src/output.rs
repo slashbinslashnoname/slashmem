@@ -58,6 +58,84 @@ impl Render for ErrorOutput {
     }
 }
 
+/// Description of a single CLI command for structured help output.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct HelpCommand {
+    pub name: String,
+    pub description: String,
+}
+
+/// Structured help output.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct HelpOutput {
+    pub version: String,
+    pub usage: String,
+    pub commands: Vec<HelpCommand>,
+    pub exit_codes: Vec<HelpExitCode>,
+}
+
+/// Exit code entry for structured help output.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct HelpExitCode {
+    pub code: i32,
+    pub meaning: String,
+}
+
+impl HelpOutput {
+    /// Build the canonical help output.
+    pub fn build() -> Self {
+        let version = env!("CARGO_PKG_VERSION").to_string();
+        Self {
+            version,
+            usage: "sm [OPTIONS] <COMMAND>".to_string(),
+            commands: vec![
+                HelpCommand { name: "context".into(), description: "Query memory for relevant context".into() },
+                HelpCommand { name: "ingest".into(), description: "Ingest an episodic record".into() },
+                HelpCommand { name: "distill".into(), description: "Run confidence decay, transitions, and pruning".into() },
+                HelpCommand { name: "status".into(), description: "Show database health and record counts".into() },
+                HelpCommand { name: "rules".into(), description: "Manage procedural rules".into() },
+            ],
+            exit_codes: vec![
+                HelpExitCode { code: 0, meaning: "success".into() },
+                HelpExitCode { code: 1, meaning: "not found".into() },
+                HelpExitCode { code: 2, meaning: "invalid input".into() },
+                HelpExitCode { code: 3, meaning: "database error".into() },
+                HelpExitCode { code: 4, meaning: "I/O error".into() },
+                HelpExitCode { code: 5, meaning: "parse error".into() },
+                HelpExitCode { code: 127, meaning: "internal error".into() },
+            ],
+        }
+    }
+
+    /// Render as compact human-readable text (~80 tokens).
+    pub fn to_human(&self) -> String {
+        let mut out = format!("sm {} — a local memory store for AI agents\n", self.version);
+        out.push_str(&format!("\nUsage: {}\n", self.usage));
+        out.push_str("\nCommands:\n");
+        for cmd in &self.commands {
+            out.push_str(&format!("  {:<10}{}\n", cmd.name, cmd.description));
+        }
+        out.push_str("\nExit codes: ");
+        let codes: Vec<String> = self.exit_codes.iter().map(|e| format!("{}={}", e.code, e.meaning)).collect();
+        out.push_str(&codes.join(", "));
+        out.push_str("\n\nRun `sm <command> --help` for details.");
+        out
+    }
+}
+
+impl Render for HelpOutput {
+    fn render(&self, fmt: &FormatContext) {
+        if fmt.use_json() {
+            if let Ok(json) = serde_json::to_string(self) {
+                println!("{json}");
+            }
+        } else {
+            // Human help goes to stderr (matches clap convention)
+            eprint!("{}", self.to_human());
+        }
+    }
+}
+
 /// JSON output for the `context` command.
 #[derive(Debug, Default, Serialize, PartialEq)]
 pub struct ContextOutput {
@@ -867,6 +945,78 @@ mod tests {
             transitioned: 1,
         };
         assert_eq!(out.to_human(), "distill: 5 decayed, 3 pruned, 1 transitioned");
+    }
+
+    // --- HelpOutput tests ---
+
+    #[test]
+    fn help_output_build_has_all_commands() {
+        let help = HelpOutput::build();
+        let names: Vec<&str> = help.commands.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["context", "ingest", "distill", "status", "rules"]);
+    }
+
+    #[test]
+    fn help_output_build_has_exit_codes() {
+        let help = HelpOutput::build();
+        assert_eq!(help.exit_codes.len(), 7);
+        assert_eq!(help.exit_codes[0].code, 0);
+        assert_eq!(help.exit_codes[0].meaning, "success");
+        assert_eq!(help.exit_codes[6].code, 127);
+        assert_eq!(help.exit_codes[6].meaning, "internal error");
+    }
+
+    #[test]
+    fn help_output_json_has_commands_array() {
+        let help = HelpOutput::build();
+        let json = serde_json::to_value(&help).unwrap();
+        assert!(json["commands"].is_array());
+        assert_eq!(json["commands"].as_array().unwrap().len(), 5);
+        assert_eq!(json["commands"][0]["name"], "context");
+        assert!(json["exit_codes"].is_array());
+        assert!(json["version"].is_string());
+        assert_eq!(json["usage"], "sm [OPTIONS] <COMMAND>");
+    }
+
+    #[test]
+    fn help_output_json_field_count() {
+        let help = HelpOutput::build();
+        let map: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&serde_json::to_string(&help).unwrap()).unwrap();
+        assert_eq!(map.len(), 4); // version, usage, commands, exit_codes
+    }
+
+    #[test]
+    fn help_output_to_human_contains_key_sections() {
+        let help = HelpOutput::build();
+        let human = help.to_human();
+        assert!(human.contains("sm "));
+        assert!(human.contains("a local memory store for AI agents"));
+        assert!(human.contains("Usage:"));
+        assert!(human.contains("Commands:"));
+        assert!(human.contains("context"));
+        assert!(human.contains("ingest"));
+        assert!(human.contains("distill"));
+        assert!(human.contains("status"));
+        assert!(human.contains("rules"));
+        assert!(human.contains("Exit codes:"));
+        assert!(human.contains("0=success"));
+        assert!(human.contains("127=internal error"));
+        assert!(human.contains("sm <command> --help"));
+    }
+
+    #[test]
+    fn help_output_render_json_mode_does_not_panic() {
+        let help = HelpOutput::build();
+        let fmt = FormatContext::new(false, true, false);
+        help.render(&fmt);
+    }
+
+    #[test]
+    fn help_output_render_human_mode_does_not_panic() {
+        let help = HelpOutput::build();
+        let fmt = FormatContext::new(true, false, false);
+        help.render(&fmt);
     }
 
     #[test]

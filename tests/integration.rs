@@ -501,25 +501,31 @@ fn rules_list_with_query_filters() {
 
 #[test]
 fn no_subcommand_prints_short_help_and_exits_zero() {
+    // When stdout is not a TTY (as in test), help is emitted as JSON to stdout.
     let output = sm_bin().output().expect("failed to run sm");
     assert!(
         output.status.success(),
         "sm with no args should exit 0, got {}",
         output.status
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("help output should be valid JSON");
     assert!(
-        stderr.contains("Usage:"),
-        "short help should include Usage line: {stderr}"
+        json["commands"].is_array(),
+        "help JSON should have commands array"
     );
+    let commands = json["commands"].as_array().unwrap();
     assert!(
-        stderr.contains("Commands:"),
-        "short help should list commands: {stderr}"
+        commands.len() >= 5,
+        "help should list at least 5 commands"
     );
-    assert!(
-        stderr.contains("status"),
-        "short help should mention 'status' command: {stderr}"
-    );
+    let names: Vec<&str> = commands.iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"context"), "should contain context");
+    assert!(names.contains(&"status"), "should contain status");
+    assert!(names.contains(&"rules"), "should contain rules");
+    assert!(json["exit_codes"].is_array(), "help JSON should have exit_codes");
+    assert!(json["version"].is_string(), "help JSON should have version");
 }
 
 // ---------------------------------------------------------------------------

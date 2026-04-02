@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 /// slashmem — a local memory store for AI agents
 #[derive(Parser, Debug)]
-#[command(name = "sm", version, about)]
+#[command(name = "sm", version, about, arg_required_else_help = false)]
 pub struct Cli {
     /// Force JSON output (default when stdout is not a TTY)
     #[arg(long, global = true)]
@@ -13,45 +13,7 @@ pub struct Cli {
     pub quiet: bool,
 
     #[command(subcommand)]
-    pub command: Commands,
-}
-
-impl Cli {
-    /// Parse CLI arguments, printing compact help and exiting when no
-    /// subcommand is provided instead of showing clap's verbose error.
-    pub fn parse_or_short_help() -> Self {
-        match Self::try_parse() {
-            Ok(cli) => cli,
-            Err(e) => {
-                // Missing subcommand → short help on stdout, exit 0.
-                if e.kind() == clap::error::ErrorKind::MissingSubcommand
-                    || (e.kind() == clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand)
-                {
-                    Self::print_short_help();
-                    std::process::exit(0);
-                }
-                // Everything else (--help, --version, real errors): let clap handle it.
-                e.exit();
-            }
-        }
-    }
-
-    /// Print a one-screen summary of available commands.
-    fn print_short_help() {
-        let version = env!("CARGO_PKG_VERSION");
-        eprintln!("sm {version} — a local memory store for AI agents");
-        eprintln!();
-        eprintln!("Usage: sm [OPTIONS] <COMMAND>");
-        eprintln!();
-        eprintln!("Commands:");
-        eprintln!("  context   Query memory for relevant context");
-        eprintln!("  ingest    Ingest an episodic record");
-        eprintln!("  distill   Run confidence decay, transitions, and pruning");
-        eprintln!("  status    Show database health and record counts");
-        eprintln!("  rules     Manage procedural rules");
-        eprintln!();
-        eprintln!("Run `sm <command> --help` for details, or `sm --help` for all options.");
-    }
+    pub command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -170,7 +132,7 @@ mod tests {
         assert!(!cli.json);
         assert!(!cli.quiet);
         match cli.command {
-            Commands::Context(args) => {
+            Some(Commands::Context(args)) => {
                 assert_eq!(args.description, "fix the login bug");
             }
             _ => panic!("expected Context command"),
@@ -211,7 +173,7 @@ mod tests {
             "sm", "ingest", "--task", "TASK-1", "--body", "did stuff", "--agent", "agent-0",
         ]);
         match cli.command {
-            Commands::Ingest(args) => {
+            Some(Commands::Ingest(args)) => {
                 assert_eq!(args.task, "TASK-1");
                 assert_eq!(args.body, "did stuff");
                 assert_eq!(args.agent, "agent-0");
@@ -229,7 +191,7 @@ mod tests {
             "--success", "rule-1", "--success", "rule-2",
         ]);
         match cli.command {
-            Commands::Ingest(args) => {
+            Some(Commands::Ingest(args)) => {
                 assert_eq!(args.success, vec!["rule-1", "rule-2"]);
                 assert!(args.harm.is_empty());
             }
@@ -244,7 +206,7 @@ mod tests {
             "--harm", "rule-3",
         ]);
         match cli.command {
-            Commands::Ingest(args) => {
+            Some(Commands::Ingest(args)) => {
                 assert!(args.success.is_empty());
                 assert_eq!(args.harm, vec!["rule-3"]);
             }
@@ -259,7 +221,7 @@ mod tests {
             "--success", "rule-1", "--harm", "rule-2", "--success", "rule-3",
         ]);
         match cli.command {
-            Commands::Ingest(args) => {
+            Some(Commands::Ingest(args)) => {
                 assert_eq!(args.success, vec!["rule-1", "rule-3"]);
                 assert_eq!(args.harm, vec!["rule-2"]);
             }
@@ -270,27 +232,27 @@ mod tests {
     #[test]
     fn parse_distill_command() {
         let cli = Cli::parse_from(["sm", "distill"]);
-        assert!(matches!(cli.command, Commands::Distill));
+        assert!(matches!(cli.command, Some(Commands::Distill)));
     }
 
     #[test]
     fn parse_status_command() {
         let cli = Cli::parse_from(["sm", "status"]);
-        assert!(matches!(cli.command, Commands::Status));
+        assert!(matches!(cli.command, Some(Commands::Status)));
     }
 
     #[test]
     fn parse_status_with_json_flag() {
         let cli = Cli::parse_from(["sm", "--json", "status"]);
         assert!(cli.json);
-        assert!(matches!(cli.command, Commands::Status));
+        assert!(matches!(cli.command, Some(Commands::Status)));
     }
 
     #[test]
     fn parse_rules_list() {
         let cli = Cli::parse_from(["sm", "rules", "list"]);
         match cli.command {
-            Commands::Rules(args) => match args.action {
+            Some(Commands::Rules(args)) => match args.action {
                 RulesAction::List(list) => assert!(list.query.is_none()),
                 _ => panic!("expected List"),
             },
@@ -302,7 +264,7 @@ mod tests {
     fn parse_rules_list_with_query() {
         let cli = Cli::parse_from(["sm", "rules", "list", "--query", "deploy"]);
         match cli.command {
-            Commands::Rules(args) => match args.action {
+            Some(Commands::Rules(args)) => match args.action {
                 RulesAction::List(list) => assert_eq!(list.query.as_deref(), Some("deploy")),
                 _ => panic!("expected List"),
             },
@@ -314,7 +276,7 @@ mod tests {
     fn parse_rules_add() {
         let cli = Cli::parse_from(["sm", "rules", "add", "r1", "Always test"]);
         match cli.command {
-            Commands::Rules(args) => match args.action {
+            Some(Commands::Rules(args)) => match args.action {
                 RulesAction::Add(add) => {
                     assert_eq!(add.id, "r1");
                     assert_eq!(add.rule, "Always test");
@@ -330,7 +292,7 @@ mod tests {
     fn parse_rules_add_with_source() {
         let cli = Cli::parse_from(["sm", "rules", "add", "r1", "test", "--source", "postmortem"]);
         match cli.command {
-            Commands::Rules(args) => match args.action {
+            Some(Commands::Rules(args)) => match args.action {
                 RulesAction::Add(add) => {
                     assert_eq!(add.source.as_deref(), Some("postmortem"));
                 }
@@ -344,7 +306,7 @@ mod tests {
     fn parse_rules_rm() {
         let cli = Cli::parse_from(["sm", "rules", "rm", "r1"]);
         match cli.command {
-            Commands::Rules(args) => match args.action {
+            Some(Commands::Rules(args)) => match args.action {
                 RulesAction::Rm(rm) => assert_eq!(rm.id, "r1"),
                 _ => panic!("expected Rm"),
             },
@@ -356,7 +318,7 @@ mod tests {
     fn parse_rules_show() {
         let cli = Cli::parse_from(["sm", "rules", "show", "r1"]);
         match cli.command {
-            Commands::Rules(args) => match args.action {
+            Some(Commands::Rules(args)) => match args.action {
                 RulesAction::Show(show) => assert_eq!(show.id, "r1"),
                 _ => panic!("expected Show"),
             },
@@ -368,25 +330,19 @@ mod tests {
     fn parse_rules_with_json_flag() {
         let cli = Cli::parse_from(["sm", "--json", "rules", "list"]);
         assert!(cli.json);
-        assert!(matches!(cli.command, Commands::Rules(_)));
+        assert!(matches!(cli.command, Some(Commands::Rules(_))));
     }
 
     #[test]
-    fn try_parse_no_args_is_error() {
-        // Running with no subcommand should produce a clap error.
-        let result = Cli::try_parse_from(["sm"]);
-        assert!(result.is_err());
+    fn no_args_yields_none_command() {
+        // With arg_required_else_help=false, no subcommand parses as None.
+        let cli = Cli::parse_from(["sm"]);
+        assert!(cli.command.is_none());
     }
 
     #[test]
     fn try_parse_valid_args_succeeds() {
         let result = Cli::try_parse_from(["sm", "status"]);
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn print_short_help_does_not_panic() {
-        // Ensure the short-help output function runs without errors.
-        Cli::print_short_help();
     }
 }
