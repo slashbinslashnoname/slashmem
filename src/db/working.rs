@@ -226,6 +226,24 @@ mod tests {
     }
 
     #[test]
+    fn by_task_returns_newest_first() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO working (summary, task_id, created_at) VALUES ('early', 'T-1', '2025-01-01 00:00:00')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO working (summary, task_id, created_at) VALUES ('later', 'T-1', '2025-06-01 00:00:00')",
+            [],
+        ).unwrap();
+
+        let results = by_task(&conn, "T-1").unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].summary, "later");
+        assert_eq!(results[1].summary, "early");
+    }
+
+    #[test]
     fn created_at_is_populated() {
         let conn = setup();
         insert(&conn, "test entry", None, None, None).unwrap();
