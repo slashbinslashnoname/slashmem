@@ -22,11 +22,14 @@ pub fn db_path() -> PathBuf {
     base_dir().join(DB_FILENAME)
 }
 
-/// Ensures the base directory exists, then opens (or creates) the SQLite database.
+/// Ensures the base directory exists, then opens (or creates) the SQLite database
+/// with the full schema applied (tables, triggers, WAL mode).
 pub fn open_db() -> crate::error::Result<rusqlite::Connection> {
     let dir = base_dir();
     std::fs::create_dir_all(&dir)?;
-    Ok(rusqlite::Connection::open(db_path())?)
+    let conn = rusqlite::Connection::open(db_path())?;
+    super::schema::ensure_schema(&conn)?;
+    Ok(conn)
 }
 
 #[cfg(test)]
