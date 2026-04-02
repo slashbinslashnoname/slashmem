@@ -65,6 +65,8 @@ mod tests {
             task: "T-1".into(),
             body: "body".into(),
             agent: "a".into(),
+            success: vec![],
+            harm: vec![],
         };
         assert!(cmd_ingest(args).is_ok());
     }
