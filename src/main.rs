@@ -2,6 +2,7 @@ pub mod cli;
 pub mod confidence;
 pub mod db;
 pub mod error;
+pub mod exit_codes;
 pub mod format;
 pub mod output;
 pub mod schema;
@@ -10,6 +11,7 @@ use std::io::IsTerminal;
 
 use clap::Parser;
 use cli::{Cli, Commands};
+use output::Render;
 
 fn main() {
     let cli = Cli::parse();
@@ -23,8 +25,9 @@ fn main() {
     };
 
     if let Err(e) = result {
-        eprintln!("error: {e}");
-        std::process::exit(1);
+        let err_out = output::ErrorOutput::from_app_error(&e);
+        err_out.render(&fmt);
+        std::process::exit(e.exit_code());
     }
 }
 
