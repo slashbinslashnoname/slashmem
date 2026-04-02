@@ -14,7 +14,10 @@ use cli::{Cli, Commands};
 use output::Render;
 
 fn main() {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => handle_clap_error(e),
+    };
     let fmt = format::FormatContext::detect(cli.json, cli.quiet);
 
     let command = match cli.command {
@@ -44,6 +47,30 @@ fn main() {
 fn display_short_help(fmt: &format::FormatContext) {
     let help = output::HelpOutput::build();
     help.render(fmt);
+}
+
+/// Handle a clap parse error in a format-aware way.
+///
+/// For display-type errors (--help, --version) clap already prints the right
+/// thing, so we let it through.  For actual parse failures we detect whether
+/// the process is in robot mode (--json flag present in raw args, or stdout
+/// is not a TTY) and, if so, emit a structured JSON error envelope to stdout
+/// instead of clap's default plain-text stderr.
+fn handle_clap_error(e: clap::Error) -> ! {
+    use clap::error::ErrorKind;
+
+    // Let display-type messages (help, version) pass through unchanged.
+    if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
+        e.exit();
+    }
+
+    // Determine robot mode from raw args: look for --json flag, or non-TTY stdout.
+    let json_flag = std::env::args().any(|a| a == "--json");
+    let fmt = format::FormatContext::detect(json_flag, false);
+
+    let err_out = output::ErrorOutput::from_clap_error(&e);
+    err_out.render(&fmt);
+    std::process::exit(exit_codes::INVALID_INPUT);
 }
 
 /// Emit a one-line warning to stderr, but only when stderr is a terminal.

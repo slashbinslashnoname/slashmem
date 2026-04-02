@@ -718,3 +718,111 @@ fn exit_code_and_error_code_consistency() {
         "process exit code ({process_exit}) should match envelope exit_code ({envelope_exit})"
     );
 }
+
+// ===========================================================================
+// 10. Clap parse errors produce JSON envelopes in robot mode
+// ===========================================================================
+
+#[test]
+fn clap_unknown_flag_produces_json_envelope_on_pipe() {
+    // In non-TTY (pipe), an unknown flag should produce a JSON error envelope
+    // on stdout, not plain text on stderr.
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["--bogus-flag"]);
+    assert!(!output.status.success());
+    assert_eq!(output.status.code().unwrap(), 2);
+
+    let json = parse_json(&output);
+    let err = &json["error"];
+    assert_eq!(err["code"], "INVALID_INPUT");
+    assert_eq!(err["exit_code"], 2);
+    assert!(err["message"].as_str().unwrap().contains("invalid input"));
+    assert!(err["suggestions"].is_array());
+    assert!(!err["suggestions"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn clap_missing_required_arg_produces_json_envelope() {
+    // `sm context` without the required <description> arg
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["context"]);
+    assert!(!output.status.success());
+    assert_eq!(output.status.code().unwrap(), 2);
+
+    let json = parse_json(&output);
+    assert_eq!(json["error"]["code"], "INVALID_INPUT");
+    assert_eq!(json["error"]["exit_code"], 2);
+}
+
+#[test]
+fn clap_error_with_json_flag_produces_json_envelope() {
+    // Even with --json explicitly, clap errors should be JSON
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["--json", "--bogus"]);
+    assert!(!output.status.success());
+
+    let json = parse_json(&output);
+    assert_eq!(json["error"]["code"], "INVALID_INPUT");
+}
+
+#[test]
+fn clap_error_envelope_has_all_required_fields() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["--unknown"]);
+    let json = parse_json(&output);
+    let err = &json["error"];
+
+    assert!(err["code"].is_string(), "code should be a string");
+    assert!(err["message"].is_string(), "message should be a string");
+    assert!(err["suggestions"].is_array(), "suggestions should be an array");
+    assert!(err["exit_code"].is_number(), "exit_code should be a number");
+}
+
+#[test]
+fn clap_error_suggestions_are_strings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["--nope"]);
+    let json = parse_json(&output);
+    let suggestions = json["error"]["suggestions"].as_array().unwrap();
+    for s in suggestions {
+        assert!(s.is_string(), "each suggestion must be a string, got: {s}");
+    }
+}
+
+#[test]
+fn clap_error_stderr_is_empty_on_pipe() {
+    // In robot mode, all output goes to stdout as JSON — stderr should be clean
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["--bogus"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.is_empty(),
+        "stderr should be empty in robot mode, got: {stderr}"
+    );
+}
+
+#[test]
+fn clap_missing_subcommand_arg_produces_json() {
+    // `sm ingest` without required --task, --body, --agent
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["ingest"]);
+    assert!(!output.status.success());
+
+    let json = parse_json(&output);
+    assert_eq!(json["error"]["code"], "INVALID_INPUT");
+    assert_eq!(json["error"]["exit_code"], 2);
+}
+
+#[test]
+fn clap_error_exit_code_consistency() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_sm(&tmp, &["--bad"]);
+    let process_exit = output.status.code().unwrap();
+    let json = parse_json(&output);
+    let envelope_exit = json["error"]["exit_code"].as_i64().unwrap() as i32;
+
+    assert_eq!(
+        process_exit, envelope_exit,
+        "process exit code ({process_exit}) should match envelope exit_code ({envelope_exit})"
+    );
+}

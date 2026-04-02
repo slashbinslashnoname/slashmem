@@ -38,6 +38,33 @@ impl ErrorOutput {
             },
         }
     }
+
+    /// Build an ErrorOutput from a clap parse error.
+    ///
+    /// Extracts the rendered message from clap and wraps it in the same
+    /// INVALID_INPUT envelope that AppError::InvalidInput would produce.
+    pub fn from_clap_error(e: &clap::Error) -> Self {
+        // clap renders a multi-line message; strip ANSI colors and use the
+        // first meaningful line as the message, or the full render if short.
+        let rendered = e.render().to_string();
+        let message = rendered
+            .lines()
+            .find(|l| l.starts_with("error:"))
+            .map(|l| l.trim_start_matches("error:").trim().to_string())
+            .unwrap_or_else(|| rendered.trim().to_string());
+
+        Self {
+            error: ErrorDetail {
+                code: "INVALID_INPUT".to_string(),
+                message: format!("invalid input: {message}"),
+                suggestions: vec![
+                    "Check the command syntax with: sm --help".to_string(),
+                    "Verify all required arguments are provided".to_string(),
+                ],
+                exit_code: crate::exit_codes::INVALID_INPUT,
+            },
+        }
+    }
 }
 
 impl Render for ErrorOutput {
