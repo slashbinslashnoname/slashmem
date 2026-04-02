@@ -2,6 +2,7 @@ pub mod cli;
 pub mod confidence;
 pub mod db;
 pub mod error;
+pub mod schema;
 
 use clap::Parser;
 use cli::{Cli, Commands};
