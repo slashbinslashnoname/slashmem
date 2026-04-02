@@ -1,3 +1,5 @@
+pub mod confidence;
+
 use clap::Parser;
 
 /// slashmem — a local memory store
