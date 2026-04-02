@@ -2,6 +2,7 @@ pub mod cli;
 pub mod confidence;
 pub mod db;
 pub mod error;
+pub mod output;
 pub mod schema;
 
 use clap::Parser;
@@ -24,19 +25,22 @@ fn main() {
 
 fn cmd_context(_args: cli::ContextArgs) -> error::Result<()> {
     // TODO: implement in slashmem-6188acc3-1su.1
-    println!("{}", serde_json::json!({"relevant_rules": [], "anti_patterns": [], "history_snippets": []}));
+    let out = output::ContextOutput::default();
+    println!("{}", serde_json::to_string(&out).unwrap());
     Ok(())
 }
 
 fn cmd_ingest(_args: cli::IngestArgs) -> error::Result<()> {
     // TODO: implement in slashmem-6188acc3-1su.2
-    println!("{}", serde_json::json!({"episodic_id": null, "proposed_rules": [], "validated_rules": []}));
+    let out = output::IngestOutput::default();
+    println!("{}", serde_json::to_string(&out).unwrap());
     Ok(())
 }
 
 fn cmd_distill() -> error::Result<()> {
     // TODO: implement in slashmem-6188acc3-1su.3
-    println!("{}", serde_json::json!({"decayed": 0, "pruned": 0, "transitioned": 0}));
+    let out = output::DistillOutput::default();
+    println!("{}", serde_json::to_string(&out).unwrap());
     Ok(())
 }
 
