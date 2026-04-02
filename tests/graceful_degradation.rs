@@ -78,8 +78,10 @@ fn distill_exits_zero_with_default_json_on_missing_db() {
     assert_eq!(json["transitioned"], 0);
 }
 
+/// When stderr is NOT a terminal (e.g. captured by `.output()`), the degradation
+/// warning should be suppressed to keep agent pipelines clean.
 #[test]
-fn context_stderr_contains_diagnostic_on_missing_db() {
+fn context_stderr_empty_when_not_tty() {
     let tmp = bad_slashmem_dir();
     let output = sm_bin()
         .env("SLASHMEM_DIR", bad_dir_path(&tmp))
@@ -89,5 +91,42 @@ fn context_stderr_contains_diagnostic_on_missing_db() {
 
     assert!(output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.is_empty(), "expected diagnostic on stderr");
+    assert!(
+        stderr.is_empty(),
+        "expected no stderr when not a TTY, got: {stderr}"
+    );
+}
+
+#[test]
+fn ingest_stderr_empty_when_not_tty() {
+    let tmp = bad_slashmem_dir();
+    let output = sm_bin()
+        .env("SLASHMEM_DIR", bad_dir_path(&tmp))
+        .args(["ingest", "--task", "T-1", "--body", "hello", "--agent", "a"])
+        .output()
+        .expect("failed to run sm");
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.is_empty(),
+        "expected no stderr when not a TTY, got: {stderr}"
+    );
+}
+
+#[test]
+fn distill_stderr_empty_when_not_tty() {
+    let tmp = bad_slashmem_dir();
+    let output = sm_bin()
+        .env("SLASHMEM_DIR", bad_dir_path(&tmp))
+        .args(["distill"])
+        .output()
+        .expect("failed to run sm");
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.is_empty(),
+        "expected no stderr when not a TTY, got: {stderr}"
+    );
 }

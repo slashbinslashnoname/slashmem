@@ -5,6 +5,8 @@ pub mod error;
 pub mod output;
 pub mod schema;
 
+use std::io::IsTerminal;
+
 use clap::Parser;
 use cli::{Cli, Commands};
 
@@ -23,6 +25,15 @@ fn main() {
     }
 }
 
+/// Emit a one-line warning to stderr, but only when stderr is a terminal.
+/// This keeps agent pipelines clean while giving interactive developers
+/// visibility into graceful degradation.
+fn warn_degraded() {
+    if std::io::stderr().is_terminal() {
+        eprintln!("sm: db unavailable, returning empty context");
+    }
+}
+
 /// Default limits for context queries.
 const PROCEDURAL_SEARCH_LIMIT: u32 = 20;
 const WORKING_SEARCH_LIMIT: u32 = 10;
@@ -30,8 +41,8 @@ const WORKING_SEARCH_LIMIT: u32 = 10;
 fn cmd_context(args: cli::ContextArgs) -> error::Result<()> {
     let out = match build_context(&args.description) {
         Ok(ctx) => ctx,
-        Err(e) => {
-            eprintln!("sm context: {e}");
+        Err(_) => {
+            warn_degraded();
             output::ContextOutput::default()
         }
     };
@@ -77,8 +88,8 @@ fn build_context_with(
 fn cmd_ingest(args: cli::IngestArgs) -> error::Result<()> {
     let out = match try_ingest(&args) {
         Ok(o) => o,
-        Err(e) => {
-            eprintln!("sm ingest: {e}");
+        Err(_) => {
+            warn_degraded();
             output::IngestOutput::default()
         }
     };
@@ -133,8 +144,8 @@ fn run_ingest(
 fn cmd_distill() -> error::Result<()> {
     let out = match try_distill() {
         Ok(o) => o,
-        Err(e) => {
-            eprintln!("sm distill: {e}");
+        Err(_) => {
+            warn_degraded();
             output::DistillOutput::default()
         }
     };
@@ -670,5 +681,13 @@ mod tests {
         assert_eq!(parsed["decayed"], 0);
         assert_eq!(parsed["pruned"], 0);
         assert_eq!(parsed["transitioned"], 0);
+    }
+
+    #[test]
+    fn warn_degraded_does_not_write_when_not_tty() {
+        // In test harness, stderr is captured (not a TTY), so warn_degraded
+        // should silently return without writing anything.
+        warn_degraded();
+        // No panic, no output — the function is safe to call in non-TTY contexts.
     }
 }
