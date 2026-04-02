@@ -78,7 +78,7 @@ fn cmd_ingest(args: cli::IngestArgs) -> error::Result<()> {
     let conn = db::init::open_db()?;
     schema::ensure_schema(&conn)?;
     let out = run_ingest(&conn, &args)?;
-    println!("{}", serde_json::to_string(&out)?)
+    println!("{}", serde_json::to_string(&out)?);
     Ok(())
 }
 
