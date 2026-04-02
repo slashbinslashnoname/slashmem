@@ -77,10 +77,46 @@ fn run_ingest(
 }
 
 fn cmd_distill() -> error::Result<()> {
-    // TODO: implement in slashmem-6188acc3-1su.3
-    let out = output::DistillOutput::default();
-    println!("{}", serde_json::to_string(&out).unwrap());
+    let conn = db::init::open_db()?;
+    schema::ensure_schema(&conn)?;
+    let out = run_distill(&conn, chrono::Utc::now())?;
+    println!("{}", serde_json::to_string(&out)?);
     Ok(())
+}
+
+fn run_distill(
+    conn: &rusqlite::Connection,
+    now: chrono::DateTime<chrono::Utc>,
+) -> error::Result<output::DistillOutput> {
+    // Snapshot current state to detect transitions
+    let rules = db::procedural::all(conn)?;
+    let before: std::collections::HashMap<String, (bool, bool)> = rules
+        .iter()
+        .map(|r| (r.id.clone(), (r.is_proven, r.is_anti_pattern)))
+        .collect();
+
+    // Recalculate confidence, is_proven, is_anti_pattern for all rules
+    let decayed = db::procedural::recalculate_confidence(conn, now)? as u64;
+
+    // Count transitions (is_proven or is_anti_pattern changed)
+    let updated_rules = db::procedural::all(conn)?;
+    let mut transitioned = 0u64;
+    for rule in &updated_rules {
+        if let Some(&(was_proven, was_anti)) = before.get(&rule.id) {
+            if rule.is_proven != was_proven || rule.is_anti_pattern != was_anti {
+                transitioned += 1;
+            }
+        }
+    }
+
+    // Prune low-confidence rules that are NOT anti-patterns
+    let pruned = db::procedural::prune_safe(conn, 0.05)? as u64;
+
+    Ok(output::DistillOutput {
+        decayed,
+        pruned,
+        transitioned,
+    })
 }
 
 #[cfg(test)]
@@ -109,8 +145,125 @@ mod tests {
     }
 
     #[test]
-    fn cmd_distill_stub_returns_ok() {
-        assert!(cmd_distill().is_ok());
+    fn distill_empty_db_returns_zeros() {
+        let conn = test_conn();
+        let out = run_distill(&conn, chrono::Utc::now()).unwrap();
+        assert_eq!(out.decayed, 0);
+        assert_eq!(out.pruned, 0);
+        assert_eq!(out.transitioned, 0);
+    }
+
+    #[test]
+    fn distill_recalculates_confidence() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "rule one", None).unwrap();
+        for _ in 0..10 {
+            db::procedural::record_success(&conn, "r1").unwrap();
+        }
+
+        let out = run_distill(&conn, chrono::Utc::now()).unwrap();
+        assert_eq!(out.decayed, 1);
+
+        let rule = db::procedural::get(&conn, "r1").unwrap().unwrap();
+        assert!(rule.confidence > 0.8);
+        assert!(rule.is_proven);
+    }
+
+    #[test]
+    fn distill_marks_anti_pattern() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "bad rule", None).unwrap();
+        for _ in 0..3 {
+            db::procedural::record_failure(&conn, "r1").unwrap();
+        }
+
+        let out = run_distill(&conn, chrono::Utc::now()).unwrap();
+        assert_eq!(out.decayed, 1);
+        assert_eq!(out.transitioned, 1); // became anti-pattern
+
+        let rule = db::procedural::get(&conn, "r1").unwrap().unwrap();
+        assert!(rule.is_anti_pattern);
+    }
+
+    #[test]
+    fn distill_prunes_low_confidence_non_anti_patterns() {
+        let conn = test_conn();
+        // Rule with no validations and old timestamp → will decay to ~0
+        db::procedural::insert(&conn, "stale", "stale rule", None).unwrap();
+        conn.execute(
+            "UPDATE procedural SET success_count = 1, last_validated = '2020-01-01 00:00:00' WHERE id = 'stale'",
+            [],
+        ).unwrap();
+
+        let now = chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 4, 1, 0, 0, 0).unwrap();
+        let out = run_distill(&conn, now).unwrap();
+        assert_eq!(out.pruned, 1);
+        assert!(db::procedural::get(&conn, "stale").unwrap().is_none());
+    }
+
+    #[test]
+    fn distill_preserves_anti_patterns_even_with_low_confidence() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "anti", "harmful rule", None).unwrap();
+        // 3 failures makes it an anti-pattern, but confidence will be very negative
+        for _ in 0..3 {
+            db::procedural::record_failure(&conn, "anti").unwrap();
+        }
+
+        let out = run_distill(&conn, chrono::Utc::now()).unwrap();
+        // Anti-pattern should NOT be pruned even though confidence < 0.05
+        assert_eq!(out.pruned, 0);
+        assert!(db::procedural::get(&conn, "anti").unwrap().is_some());
+        assert!(db::procedural::get(&conn, "anti").unwrap().unwrap().is_anti_pattern);
+    }
+
+    #[test]
+    fn distill_counts_transitions_correctly() {
+        let conn = test_conn();
+        // Rule that will become proven
+        db::procedural::insert(&conn, "good", "good rule", None).unwrap();
+        for _ in 0..10 {
+            db::procedural::record_success(&conn, "good").unwrap();
+        }
+        // Rule that will become anti-pattern
+        db::procedural::insert(&conn, "bad", "bad rule", None).unwrap();
+        for _ in 0..4 {
+            db::procedural::record_failure(&conn, "bad").unwrap();
+        }
+        // Rule that stays the same (no changes)
+        db::procedural::insert(&conn, "neutral", "neutral rule", None).unwrap();
+
+        let out = run_distill(&conn, chrono::Utc::now()).unwrap();
+        assert_eq!(out.transitioned, 2); // good→proven, bad→anti_pattern
+    }
+
+    #[test]
+    fn distill_output_serializes_correctly() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "rule", None).unwrap();
+        let out = run_distill(&conn, chrono::Utc::now()).unwrap();
+        let json: serde_json::Value = serde_json::to_value(&out).unwrap();
+        assert!(json["decayed"].is_u64());
+        assert!(json["pruned"].is_u64());
+        assert!(json["transitioned"].is_u64());
+    }
+
+    #[test]
+    fn distill_no_transition_on_second_run() {
+        let conn = test_conn();
+        db::procedural::insert(&conn, "r1", "rule", None).unwrap();
+        for _ in 0..10 {
+            db::procedural::record_success(&conn, "r1").unwrap();
+        }
+
+        let now = chrono::Utc::now();
+        // First run: transitions from not-proven to proven
+        let out1 = run_distill(&conn, now).unwrap();
+        assert_eq!(out1.transitioned, 1);
+
+        // Second run: no transition since already proven
+        let out2 = run_distill(&conn, now).unwrap();
+        assert_eq!(out2.transitioned, 0);
     }
 
     #[test]

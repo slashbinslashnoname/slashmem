@@ -168,6 +168,25 @@ pub fn prune(conn: &Connection, threshold: f64) -> crate::error::Result<u32> {
     Ok(deleted as u32)
 }
 
+/// Return all procedural rules.
+pub fn all(conn: &Connection) -> crate::error::Result<Vec<ProceduralRule>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS} FROM procedural"
+    ))?;
+    let rows = stmt.query_map([], map_row)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Delete rules with confidence below `threshold` that are NOT anti-patterns.
+/// Returns the number of rules pruned.
+pub fn prune_safe(conn: &Connection, threshold: f64) -> crate::error::Result<u32> {
+    let deleted = conn.execute(
+        "DELETE FROM procedural WHERE confidence < ?1 AND is_anti_pattern = 0",
+        params![threshold],
+    )?;
+    Ok(deleted as u32)
+}
+
 /// Return all rules currently marked as proven (is_proven = 1).
 pub fn proven_rules(conn: &Connection) -> crate::error::Result<Vec<ProceduralRule>> {
     let mut stmt = conn.prepare(&format!(
@@ -437,5 +456,53 @@ mod tests {
         let rule = get(&conn, "r1").unwrap().unwrap();
         assert!(!rule.created_at.is_empty());
         assert!(!rule.updated_at.is_empty());
+    }
+
+    #[test]
+    fn all_returns_every_rule() {
+        let conn = setup();
+        insert(&conn, "r1", "rule one", None).unwrap();
+        insert(&conn, "r2", "rule two", None).unwrap();
+        insert(&conn, "r3", "rule three", None).unwrap();
+        let rules = all(&conn).unwrap();
+        assert_eq!(rules.len(), 3);
+    }
+
+    #[test]
+    fn all_empty_db() {
+        let conn = setup();
+        let rules = all(&conn).unwrap();
+        assert!(rules.is_empty());
+    }
+
+    #[test]
+    fn prune_safe_keeps_anti_patterns() {
+        let conn = setup();
+        insert(&conn, "good", "good rule", None).unwrap();
+        insert(&conn, "anti", "anti rule", None).unwrap();
+        insert(&conn, "stale", "stale rule", None).unwrap();
+
+        // Make "good" high confidence
+        for _ in 0..10 {
+            record_success(&conn, "good").unwrap();
+        }
+        // Make "anti" an anti-pattern with low confidence
+        for _ in 0..3 {
+            record_failure(&conn, "anti").unwrap();
+        }
+        // "stale" stays at default 0.5, but let's set it low
+        conn.execute(
+            "UPDATE procedural SET success_count = 1, last_validated = '2020-01-01 00:00:00' WHERE id = 'stale'",
+            [],
+        ).unwrap();
+
+        recalculate_confidence(&conn, Utc::now()).unwrap();
+
+        let pruned = prune_safe(&conn, 0.05).unwrap();
+        // stale should be pruned, anti should NOT be pruned (is_anti_pattern=1)
+        assert_eq!(pruned, 1);
+        assert!(get(&conn, "good").unwrap().is_some());
+        assert!(get(&conn, "anti").unwrap().is_some());
+        assert!(get(&conn, "stale").unwrap().is_none());
     }
 }
