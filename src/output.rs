@@ -138,6 +138,7 @@ impl HelpOutput {
                 HelpCommand { name: "status".into(), description: "Show database health and record counts".into() },
                 HelpCommand { name: "rules".into(), description: "Manage procedural rules".into() },
                 HelpCommand { name: "prompt".into(), description: "Display agent integration prompt".into() },
+                HelpCommand { name: "projects".into(), description: "List known projects".into() },
             ],
             exit_codes: vec![
                 HelpExitCode { code: 0, meaning: "success".into() },
@@ -186,6 +187,8 @@ pub struct ContextOutput {
     pub relevant_rules: Vec<String>,
     pub anti_patterns: Vec<String>,
     pub history_snippets: Vec<String>,
+    /// IDs of all rules returned (proven + anti-patterns), for caller-side tracking.
+    pub rule_ids: Vec<String>,
 }
 
 impl ContextOutput {
@@ -423,11 +426,57 @@ impl StatusOutput {
     }
 }
 
+/// JSON output for the `projects` command.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct ProjectsOutput {
+    pub projects: Vec<ProjectEntry>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct ProjectEntry {
+    pub name: String,
+    pub path: String,
+    pub db_path: String,
+}
+
+impl ProjectsOutput {
+    pub fn from_project_list(projects: &[crate::db::init::ProjectInfo]) -> Self {
+        Self {
+            projects: projects
+                .iter()
+                .map(|p| ProjectEntry {
+                    name: p.name.clone(),
+                    path: p.path.clone(),
+                    db_path: p.db_path.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn to_human(&self) -> String {
+        if self.projects.is_empty() {
+            return "No projects found.".to_string();
+        }
+        let mut lines = Vec::new();
+        for p in &self.projects {
+            let label = if p.path.is_empty() {
+                p.name.clone()
+            } else {
+                format!("{} ({})", p.name, p.path)
+            };
+            lines.push(format!("  {} → {}", label, p.db_path));
+        }
+        format!("Projects:\n{}", lines.join("\n"))
+    }
+}
+
 /// The agent integration prompt text, suitable for inclusion in CLAUDE.md or
 /// system prompts.
 pub const AGENT_PROMPT: &str = r#"# Memory — slashmem
 
 You have access to `sm`, a local memory store. Use it to persist and retrieve procedural knowledge across sessions.
+
+Memory is automatically scoped per project: when run inside a git repository, `sm` detects the repo root and uses a project-specific database. No configuration needed. Use `--project <name>` to access a different project's memory.
 
 ## Before starting a task
 
@@ -477,6 +526,13 @@ sm rules show <rule-id>          # inspect a rule
 sm rules rm <rule-id>            # remove a rule
 ```
 
+## Cross-project access
+
+```bash
+sm projects                      # list all known projects
+sm --project <name> context "deploy"  # query another project's memory
+```
+
 ## Output format
 
 All commands output JSON when piped (or with `--json`). Parse output with `jq` or your JSON library. Errors follow this envelope:
@@ -517,6 +573,7 @@ mod tests {
         assert_eq!(json["relevant_rules"], serde_json::json!([]));
         assert_eq!(json["anti_patterns"], serde_json::json!([]));
         assert_eq!(json["history_snippets"], serde_json::json!([]));
+        assert_eq!(json["rule_ids"], serde_json::json!([]));
     }
 
     #[test]
@@ -525,11 +582,13 @@ mod tests {
             relevant_rules: vec!["r1".into()],
             anti_patterns: vec!["a1".into()],
             history_snippets: vec!["h1".into()],
+            rule_ids: vec!["id1".into(), "id2".into()],
         };
         let json = serde_json::to_string(&out).unwrap();
         assert!(json.contains("\"relevant_rules\""));
         assert!(json.contains("\"anti_patterns\""));
         assert!(json.contains("\"history_snippets\""));
+        assert!(json.contains("\"rule_ids\""));
     }
 
     #[test]
@@ -787,7 +846,7 @@ mod tests {
         // Ensure no extra fields sneak in
         let ctx: serde_json::Map<String, serde_json::Value> =
             serde_json::from_str(&serde_json::to_string(&ContextOutput::default()).unwrap()).unwrap();
-        assert_eq!(ctx.len(), 3);
+        assert_eq!(ctx.len(), 4);
 
         let ing: serde_json::Map<String, serde_json::Value> =
             serde_json::from_str(&serde_json::to_string(&IngestOutput::default()).unwrap()).unwrap();
@@ -989,6 +1048,7 @@ mod tests {
             ],
             anti_patterns: vec!["Do not run VACUUM inside a transaction".into()],
             history_snippets: vec!["[2026-03-28] Migrated schema".into()],
+            rule_ids: vec!["r1".into(), "r2".into(), "a1".into()],
         };
         let human = out.to_human();
         assert!(human.contains("rules (2):"));
@@ -1006,6 +1066,7 @@ mod tests {
             relevant_rules: vec!["Rule one".into()],
             anti_patterns: vec![],
             history_snippets: vec![],
+            rule_ids: vec!["r1".into()],
         };
         let human = out.to_human();
         assert!(human.contains("rules (1):"));
@@ -1019,6 +1080,7 @@ mod tests {
             relevant_rules: vec!["r1".into()],
             anti_patterns: vec!["a1".into()],
             history_snippets: vec![],
+            rule_ids: vec!["id1".into(), "id2".into()],
         };
         let human = out.to_human();
         assert!(human.contains("\n\n"));
@@ -1089,7 +1151,7 @@ mod tests {
     fn help_output_build_has_all_commands() {
         let help = HelpOutput::build();
         let names: Vec<&str> = help.commands.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, vec!["context", "ingest", "distill", "status", "rules", "prompt"]);
+        assert_eq!(names, vec!["context", "ingest", "distill", "status", "rules", "prompt", "projects"]);
     }
 
     #[test]
@@ -1107,7 +1169,7 @@ mod tests {
         let help = HelpOutput::build();
         let json = serde_json::to_value(&help).unwrap();
         assert!(json["commands"].is_array());
-        assert_eq!(json["commands"].as_array().unwrap().len(), 6);
+        assert_eq!(json["commands"].as_array().unwrap().len(), 7);
         assert_eq!(json["commands"][0]["name"], "context");
         assert!(json["exit_codes"].is_array());
         assert!(json["version"].is_string());

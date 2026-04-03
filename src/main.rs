@@ -20,6 +20,9 @@ fn main() {
     };
     let fmt = format::FormatContext::detect(cli.json, cli.quiet);
 
+    // Apply --project override before any database access
+    db::init::set_project_override(cli.project);
+
     let command = match cli.command {
         Some(cmd) => cmd,
         None => {
@@ -42,6 +45,7 @@ fn main() {
         Commands::Status => cmd_status(&fmt),
         Commands::Rules(args) => cmd_rules(args, &fmt),
         Commands::Prompt => cmd_prompt(&fmt),
+        Commands::Projects => cmd_projects(&fmt),
     };
 
     if let Err(e) = result {
@@ -100,7 +104,7 @@ const PROCEDURAL_SEARCH_LIMIT: u32 = 20;
 const WORKING_SEARCH_LIMIT: u32 = 10;
 
 fn cmd_context(args: cli::ContextArgs, fmt: &format::FormatContext) -> error::Result<()> {
-    let out = match build_context(&args.description) {
+    let out = match build_context(&args.description, args.limit, args.anti_limit) {
         Ok(ctx) => ctx,
         Err(_) => {
             warn_degraded();
@@ -117,27 +121,35 @@ fn cmd_context(args: cli::ContextArgs, fmt: &format::FormatContext) -> error::Re
     Ok(())
 }
 
-fn build_context(description: &str) -> error::Result<output::ContextOutput> {
+fn build_context(
+    description: &str,
+    rule_limit: u32,
+    anti_limit: u32,
+) -> error::Result<output::ContextOutput> {
     let conn = db::init::open_db()?;
     schema::ensure_schema(&conn)?;
-    build_context_with(&conn, description)
+    build_context_with(&conn, description, rule_limit, anti_limit)
 }
 
 fn build_context_with(
     conn: &rusqlite::Connection,
     description: &str,
+    rule_limit: u32,
+    anti_limit: u32,
 ) -> error::Result<output::ContextOutput> {
     // FTS5 search on procedural rules, split into proven rules and anti-patterns.
     let procedural_hits = db::procedural::search(conn, description, PROCEDURAL_SEARCH_LIMIT)?;
 
     let mut relevant_rules = Vec::new();
     let mut anti_patterns = Vec::new();
+    let mut rule_ids = Vec::new();
     for rule in &procedural_hits {
-        if rule.is_anti_pattern {
+        if rule.is_anti_pattern && anti_patterns.len() < anti_limit as usize {
             anti_patterns.push(rule.rule.clone());
-        }
-        if rule.is_proven {
+            rule_ids.push(rule.id.clone());
+        } else if rule.is_proven && relevant_rules.len() < rule_limit as usize {
             relevant_rules.push(rule.rule.clone());
+            rule_ids.push(rule.id.clone());
         }
     }
 
@@ -149,6 +161,7 @@ fn build_context_with(
         relevant_rules,
         anti_patterns,
         history_snippets,
+        rule_ids,
     })
 }
 
@@ -284,6 +297,19 @@ fn build_status(conn: &rusqlite::Connection) -> error::Result<output::StatusOutp
 
 fn cmd_prompt(fmt: &format::FormatContext) -> error::Result<()> {
     let out = output::PromptOutput::build();
+    if !fmt.is_quiet() {
+        if fmt.use_json() {
+            println!("{}", serde_json::to_string(&out)?);
+        } else {
+            println!("{}", out.to_human());
+        }
+    }
+    Ok(())
+}
+
+fn cmd_projects(fmt: &format::FormatContext) -> error::Result<()> {
+    let projects = db::init::list_projects();
+    let out = output::ProjectsOutput::from_project_list(&projects);
     if !fmt.is_quiet() {
         if fmt.use_json() {
             println!("{}", serde_json::to_string(&out)?);
@@ -504,6 +530,8 @@ mod tests {
     fn cmd_context_stub_returns_ok() {
         let args = cli::ContextArgs {
             description: "test".into(),
+            limit: 10,
+            anti_limit: 5,
         };
         let fmt = format::FormatContext::new(false, true, false);
         assert!(cmd_context(args, &fmt).is_ok());
@@ -764,7 +792,7 @@ mod tests {
     #[test]
     fn context_empty_db_returns_empty_output() {
         let conn = setup();
-        let out = build_context_with(&conn, "anything").unwrap();
+        let out = build_context_with(&conn, "anything", 10, 5).unwrap();
         assert_eq!(out, output::ContextOutput::default());
     }
 
@@ -778,9 +806,10 @@ mod tests {
         }
         db::procedural::recalculate_confidence(&conn, Utc::now()).unwrap();
 
-        let out = build_context_with(&conn, "validate deploy").unwrap();
+        let out = build_context_with(&conn, "validate deploy", 10, 5).unwrap();
         assert_eq!(out.relevant_rules, vec!["Always validate deploy inputs"]);
         assert!(out.anti_patterns.is_empty());
+        assert_eq!(out.rule_ids, vec!["r1"]);
     }
 
     #[test]
@@ -793,9 +822,10 @@ mod tests {
         }
         db::procedural::recalculate_confidence(&conn, Utc::now()).unwrap();
 
-        let out = build_context_with(&conn, "deploy tests").unwrap();
+        let out = build_context_with(&conn, "deploy tests", 10, 5).unwrap();
         assert_eq!(out.anti_patterns, vec!["Skip deploy tests for speed"]);
         assert!(out.relevant_rules.is_empty());
+        assert_eq!(out.rule_ids, vec!["r1"]);
     }
 
     #[test]
@@ -812,9 +842,11 @@ mod tests {
         }
         db::procedural::recalculate_confidence(&conn, Utc::now()).unwrap();
 
-        let out = build_context_with(&conn, "deploy").unwrap();
+        let out = build_context_with(&conn, "deploy", 10, 5).unwrap();
         assert!(out.relevant_rules.contains(&"Always run deploy checks".to_string()));
         assert!(out.anti_patterns.contains(&"Skip deploy validation".to_string()));
+        assert!(out.rule_ids.contains(&"good".to_string()));
+        assert!(out.rule_ids.contains(&"bad".to_string()));
     }
 
     #[test]
@@ -824,9 +856,10 @@ mod tests {
         // — not proven (needs >0.8) and not anti-pattern (needs >=3 failures).
         db::procedural::insert(&conn, "r1", "Some deploy guideline", None).unwrap();
 
-        let out = build_context_with(&conn, "deploy").unwrap();
+        let out = build_context_with(&conn, "deploy", 10, 5).unwrap();
         assert!(out.relevant_rules.is_empty());
         assert!(out.anti_patterns.is_empty());
+        assert!(out.rule_ids.is_empty());
     }
 
     #[test]
@@ -835,7 +868,7 @@ mod tests {
         db::working::insert(&conn, "Fixed auth token refresh", Some("body"), Some("T-1"), None).unwrap();
         db::working::insert(&conn, "Unrelated deploy work", None, None, None).unwrap();
 
-        let out = build_context_with(&conn, "auth token").unwrap();
+        let out = build_context_with(&conn, "auth token", 10, 5).unwrap();
         assert_eq!(out.history_snippets, vec!["Fixed auth token refresh"]);
     }
 
@@ -844,7 +877,7 @@ mod tests {
         let conn = setup();
         db::working::insert(&conn, "deploy pipeline fix", None, None, None).unwrap();
 
-        let out = build_context_with(&conn, "authentication").unwrap();
+        let out = build_context_with(&conn, "authentication", 10, 5).unwrap();
         assert!(out.history_snippets.is_empty());
     }
 
@@ -861,7 +894,7 @@ mod tests {
         // Working memory
         db::working::insert(&conn, "Refactored tokens validation", None, None, None).unwrap();
 
-        let out = build_context_with(&conn, "tokens").unwrap();
+        let out = build_context_with(&conn, "tokens", 10, 5).unwrap();
         assert!(!out.relevant_rules.is_empty());
         assert!(!out.history_snippets.is_empty());
     }
@@ -871,13 +904,51 @@ mod tests {
         let conn = setup();
         // FTS5 returns a syntax error for empty queries. cmd_context catches errors
         // and falls back to ContextOutput::default(). Mirror that logic here.
-        let out = match build_context_with(&conn, "") {
+        let out = match build_context_with(&conn, "", 10, 5) {
             Ok(ctx) => ctx,
             Err(_) => output::ContextOutput::default(),
         };
         assert!(out.relevant_rules.is_empty());
         assert!(out.anti_patterns.is_empty());
         assert!(out.history_snippets.is_empty());
+    }
+
+    #[test]
+    fn context_respects_rule_limit() {
+        let conn = setup();
+        // Create 5 proven rules matching "deploy"
+        for i in 0..5 {
+            let id = format!("r{i}");
+            let rule = format!("Deploy guideline number {i}");
+            db::procedural::insert(&conn, &id, &rule, None).unwrap();
+            for _ in 0..10 {
+                db::procedural::record_success(&conn, &id).unwrap();
+            }
+        }
+        db::procedural::recalculate_confidence(&conn, Utc::now()).unwrap();
+
+        let out = build_context_with(&conn, "deploy", 2, 5).unwrap();
+        assert_eq!(out.relevant_rules.len(), 2);
+        assert_eq!(out.rule_ids.len(), 2);
+    }
+
+    #[test]
+    fn context_respects_anti_limit() {
+        let conn = setup();
+        // Create 5 anti-pattern rules matching "deploy"
+        for i in 0..5 {
+            let id = format!("a{i}");
+            let rule = format!("Bad deploy practice {i}");
+            db::procedural::insert(&conn, &id, &rule, None).unwrap();
+            for _ in 0..4 {
+                db::procedural::record_failure(&conn, &id).unwrap();
+            }
+        }
+        db::procedural::recalculate_confidence(&conn, Utc::now()).unwrap();
+
+        let out = build_context_with(&conn, "deploy", 10, 2).unwrap();
+        assert_eq!(out.anti_patterns.len(), 2);
+        assert_eq!(out.rule_ids.len(), 2);
     }
 
     // --- graceful degradation tests ---
@@ -890,7 +961,7 @@ mod tests {
     #[test]
     fn context_degrades_on_missing_schema() {
         let conn = broken_conn();
-        let result = build_context_with(&conn, "anything");
+        let result = build_context_with(&conn, "anything", 10, 5);
         assert!(result.is_err());
     }
 
@@ -922,7 +993,7 @@ mod tests {
         // We can't mutate the env safely across threads, so test the inner
         // try-catch pattern directly by calling build_context with a broken conn.
         let conn = broken_conn();
-        let out = match build_context_with(&conn, "test") {
+        let out = match build_context_with(&conn, "test", 10, 5) {
             Ok(ctx) => ctx,
             Err(_) => output::ContextOutput::default(),
         };

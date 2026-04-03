@@ -8,7 +8,7 @@ A local memory store for AI agents. Slashmem gives agents persistent procedural 
 cargo install --path .
 ```
 
-The binary is called `sm`. Data is stored in `~/.slashmem/mem.db` (override with `SLASHMEM_DIR`).
+The binary is called `sm`. Memory is automatically scoped per project — when run inside a git repository, `sm` uses a project-specific database under `~/.slashmem/projects/`. Outside a git repo, it falls back to the global `~/.slashmem/mem.db`.
 
 ## Quick start
 
@@ -239,11 +239,25 @@ Anti-patterns are never pruned, even at low confidence — they represent valuab
 | **Working** | Short-term task summaries, full-text searchable | Permanent (searched with recency bias) |
 | **Procedural** | Learned rules with confidence scoring | Pruned when confidence < 0.05 (except anti-patterns) |
 
+## Per-project memory
+
+When run inside a git repository, `sm` automatically detects the repo root and stores memory in `~/.slashmem/projects/<hash>/mem.db`. This means each project gets its own isolated memory — no configuration needed.
+
+To access another project's memory, use `--project <name>`:
+
+```bash
+sm --project <hash-or-name> context "deploy"
+sm projects   # list all known projects
+```
+
+Outside a git repo (or when `SLASHMEM_DIR` is set), `sm` falls back to the global database.
+
 ## Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SLASHMEM_DIR` | `~/.slashmem` | Directory for the SQLite database |
+| `SLASHMEM_DIR` | `~/.slashmem` | Root directory for slashmem storage (overrides auto-detection) |
+| `--project` | (auto-detect) | Use a specific project's memory by name or hash |
 
 ---
 
@@ -251,10 +265,14 @@ Anti-patterns are never pruned, even at low confidence — they represent valuab
 
 Copy the block below into your agent's system prompt or CLAUDE.md to give it access to slashmem:
 
+Use `sm prompt` to get the latest version, or copy the block below:
+
 ````markdown
 # Memory — slashmem
 
 You have access to `sm`, a local memory store. Use it to persist and retrieve procedural knowledge across sessions.
+
+Memory is automatically scoped per project: when run inside a git repository, `sm` detects the repo root and uses a project-specific database. No configuration needed. Use `--project <name>` to access a different project's memory.
 
 ## Before starting a task
 
@@ -302,6 +320,13 @@ sm rules list                    # list all rules
 sm rules list --query "deploy"   # search rules
 sm rules show <rule-id>          # inspect a rule
 sm rules rm <rule-id>            # remove a rule
+```
+
+## Cross-project access
+
+```bash
+sm projects                      # list all known projects
+sm --project <name> context "deploy"  # query another project's memory
 ```
 
 ## Output format

@@ -12,6 +12,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub quiet: bool,
 
+    /// Use a specific project's memory (by name or hash)
+    #[arg(long, global = true)]
+    pub project: Option<String>,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -30,6 +34,8 @@ pub enum Commands {
     Rules(RulesArgs),
     /// Display agent integration prompt (for CLAUDE.md / system prompts)
     Prompt,
+    /// List known projects
+    Projects,
 }
 
 /// Arguments for the `rules` subcommand.
@@ -92,6 +98,14 @@ pub struct RulesShowArgs {
 pub struct ContextArgs {
     /// Task description to search for relevant memories
     pub description: String,
+
+    /// Maximum number of rules to return (default: 10)
+    #[arg(long, default_value_t = 10)]
+    pub limit: u32,
+
+    /// Maximum number of anti-patterns to return (default: 5)
+    #[arg(long, default_value_t = 5)]
+    pub anti_limit: u32,
 }
 
 /// Arguments for the `ingest` subcommand.
